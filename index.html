@@ -365,7 +365,17 @@
         110.00, 0, 0, 0, 98.00, 0, 0, 0     // A2 . . . G2 . . .
       ];
 
-      const NOTE_DURATION = 200;   // длительность одной ноты в мс (200 мс = спокойный темп)
+      // Динамический темп музыки: чем быстрее мяч, тем быстрее музыка
+      function getNoteDuration() {
+        const speed = getBallSpeed();   // текущая скорость мяча
+        const baseDuration = 200;       // базовая длительность на 1 уровне
+        
+        // Чем выше скорость мяча, тем короче нота
+        const factor = CONFIG.ballBaseSpeed / speed;
+        
+        // Ограничение: не быстрее 70 мс (иначе будет слишком безумно)
+        return Math.max(70, baseDuration * factor);
+      }
 
       // Играет одну ноту музыки (тише, чем звуковые эффекты)
       function playMusicNote(frequency, duration, type = "sine", volume = 0.05) {
@@ -399,25 +409,29 @@
         function playNextNote() {
           if (!musicPlaying || !musicEnabled) return;
           
+          // Длительность пересчитывается КАЖДЫЙ РАЗ — 
+          // поэтому при переходе на новый уровень темп изменится автоматически
+          const duration = getNoteDuration();
+          
           // Играем ноту мелодии (если не пауза)
           const melodyNote = MELODY[currentNoteIndex];
           if (melodyNote > 0) {
-            playMusicNote(melodyNote, NOTE_DURATION, "sine", 0.05);
+            playMusicNote(melodyNote, duration, "sine", 0.05);
           }
           
           // Играем бас (каждую 4-ю ноту)
           if (currentNoteIndex % 4 === 0) {
             const bassNote = BASS[currentNoteIndex];
             if (bassNote > 0) {
-              playMusicNote(bassNote, NOTE_DURATION * 2, "triangle", 0.04);
+              playMusicNote(bassNote, duration * 2, "triangle", 0.04);
             }
           }
           
           // Переходим к следующей ноте
           currentNoteIndex = (currentNoteIndex + 1) % MELODY.length;
           
-          // Планируем следующую ноту
-          musicTimer = setTimeout(playNextNote, NOTE_DURATION);
+          // Планируем следующую ноту с ТЕКУЩЕЙ длительностью
+          musicTimer = setTimeout(playNextNote, duration);
         }
         
         playNextNote();
