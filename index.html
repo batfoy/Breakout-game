@@ -1,0 +1,1888 @@
+<!doctype html>
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="description" content="Классический арканоид на чистом JavaScript и Canvas: 7 уровней, 5 бонусов, лазер, фоновая музыка и таблица рекордов.">
+    <meta property="og:title" content="Breakout — Классический арканоид">
+    <meta property="og:description" content="Арканоид на чистом JavaScript: 7 уровней, бонусы, лазер, музыка и таблица рекордов">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://github.com/batfoy/Breakout-game">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧱</text></svg>">
+    <title>Breakout — Классический арканоид</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+      * { padding: 0; margin: 0; box-sizing: border-box; }
+      
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;   /* убираем скролл */
+        background: #0d0d1a; /* тёмный фон под канвас */
+        touch-action: none; /* отключаем стандартные жесты везде */
+        user-select: none;  /* отключаем выделение текста */
+        -webkit-user-select: none;
+        -webkit-touch-callout: none; /* отключаем долгое нажатие на iOS */
+      }
+      
+      body {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+      }
+
+      /* Канвас занимает всю ширину и адаптируется */
+      canvas { 
+        background: #eeeeee; 
+        display: block;
+        width: 95%;          /* на всю ширину экрана */
+        max-width: 600px;     /* но не больше 800px на больших экранах */
+        height: auto;         /* высота вычисляется автоматически по пропорциям */
+        max-height: 85vh;     /* максимум 85% высоты экрана (чтобы кнопки влезли) */
+        touch-action: none;
+        margin: 0 auto;       /* центрируем по горизонтали */
+      }
+
+
+      /* Панель с кнопками */
+      .controls { 
+        position: fixed;
+        bottom: 10px;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        z-index: 100;
+        padding: 0 10px;
+      }
+      
+      button { 
+        padding: 10px 18px; 
+        font-size: 15px; 
+        cursor: pointer; 
+        border: none; 
+        border-radius: 6px;
+        font-weight: bold;
+        transition: transform 0.1s;
+      }
+
+      #leaderboardButton {
+        background: #FFE66D;
+        color: #333;
+      }
+      
+      button:active {
+        transform: scale(0.95);  /* эффект нажатия */
+      }
+      
+      
+      #pauseButton { 
+        background: #FFE66D; 
+        color: #333;
+      }
+
+      #resetButton {
+        background: #FF6B6B;
+        color: #fff;
+      }
+
+      /* Прячем кнопку Start (она всё равно скрыта через JS) */
+      #runButton {
+        display: none;
+      }
+
+      
+      /* На очень маленьких экранах делаем кнопки компактнее */
+      @media (max-width: 400px) {
+        button {
+          padding: 8px 14px;
+          font-size: 13px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="myCanvas" width="480" height="400"></canvas>
+    <div class="controls">
+      <button id="runButton">Start game</button>
+      <button id="resetButton">Reset Record</button>
+      <button id="leaderboardButton">🏆 Рекорды</button>
+      <button id="pauseButton">⏸ Пауза</button>
+    </div>
+
+    <script>
+      /*
+      * BREAKOUT — Классический арканоид
+      * 
+      * Игра написана на чистом JavaScript + HTML5 Canvas с помощью qwen 3.8max
+      * Без внешних библиотек и зависимостей
+      * 
+      * Возможности:
+      * - 7 уровней с разными макетами
+      * - 5 бонусов (расширение, жизнь, замедление, очки, лазер)
+      * - Фоновая музыка через Web Audio API
+      * - Таблица рекордов в localStorage
+      * - Поддержка мобильных устройств
+      * 
+      * Автор: [Евгений Щербинин]
+      * Дата: Октябрь 2026
+      */
+      const canvas = document.getElementById("myCanvas");
+      const ctx = canvas.getContext("2d");
+
+      // ВСЕ НАСТРОЙКИ ИГРЫ В ОДНОМ МЕСТЕ
+      const CONFIG = {
+        bonusChance: 0.2,        // шанс выпадения бонуса
+        ballBaseSpeed: 3.5,        // базовая скорость шарика
+        speedPerLevel: 0.3,      // насколько быстрее на каждом уровне
+        moveBrickSpeed: 1.5,     // скорость движущегося кирпича
+        moveBrickHealth: 5,      // прочность движущегося кирпича
+        maxLevelSpeed: 20         // предел скорости
+      };
+
+      // Цветовые темы для разных уровней
+      const THEMES = [
+        { bgCenter: "#2a3a50", bgEdge: "#0d1520", accent: "#0095DD" },  // Уровень 1 — синий
+        { bgCenter: "#2a4040", bgEdge: "#0d2020", accent: "#4ECDC4" },  // Уровень 2 — зелёный
+        { bgCenter: "#402a2a", bgEdge: "#200d0d", accent: "#FF6B6B" },  // Уровень 3 — красный
+        { bgCenter: "#3a2a50", bgEdge: "#1a0d30", accent: "#B57EDC" },  // Уровень 4 — фиолетовый
+        { bgCenter: "#403a2a", bgEdge: "#201a0d", accent: "#FFE66D" }   // Уровень 5 — золотой
+      ];
+
+      let currentTheme = THEMES[0];
+      
+      // --- НАСТРОЙКИ ИГРЫ ---
+      const ballRadius = 10;
+      const paddleHeight = 10;
+      const paddleWidthBase = 75;
+      const brickWidth = 75;
+      const brickHeight = 20;
+      const brickPadding = 10;
+      const brickOffsetTop = Math.floor(canvas.height * 0.11);
+      const brickOffsetLeft = 30;
+
+      // --- ПЕРЕМЕННЫЕ СОСТОЯНИЯ ---
+      let brickRowCount = 3;
+      let brickColumnCount = 5;
+      let totalBricks = 0;        // общее количество кирпичей на уровне (для проверки победы)
+      let gameOver = false;
+      let gameStarted = false;
+      let gameStartTime = 0;   // время, когда игра была запущена
+      let wallFlashes = [];   // массив вспышек на стенах
+
+      // --- ФОНОВАЯ МУЗЫКА ---
+      let musicEnabled = true;      // включена ли музыка
+      let musicPlaying = false;     // играет ли сейчас
+      let musicTimer = null;        // таймер для зацикливания
+      let currentNoteIndex = 0;     // текущая нота мелодии
+
+      let ballTrail = [];   // массив позиций следа мяча
+      const TRAIL_LENGTH = 20;   // длина следа
+
+      // Макеты уровней
+      // 0 = пусто, 1 = обычный (1 удар), 2 = крепкий (2 удара), 3 = очень крепкий (3 удара)
+      const levels = [
+        // УРОВЕНЬ 1 — простой (как сейчас)
+        [
+          [1, 1, 1, 1, 1],
+          [1, 1, 1, 1, 1],
+          [1, 1, 1, 1, 1]
+        ],
+        // УРОВЕНЬ 2 — крепкие в центре
+        [
+          [1, 1, 1, 1, 1],
+          [1, 2, 2, 2, 1],
+          [1, 2, 2, 2, 1],
+          [1, 1, 1, 1, 1]
+        ],
+        // УРОВЕНЬ 3 — шахматы с очень крепким центром
+        [
+          [1, 0, 1, 0, 1],
+          [0, 2, 0, 2, 0],
+          [1, 0, 4, 0, 1],
+          [0, 2, 0, 2, 0],
+          [1, 0, 1, 0, 1]
+        ],
+        // УРОВЕНЬ 4 — пирамида
+        [
+          [0, 0, 3, 0, 0],
+          [0, 2, 3, 2, 0],
+          [1, 2, 3, 2, 1],
+          [1, 1, 2, 1, 1],
+          [1, 1, 1, 1, 1]
+        ],
+        // УРОВЕНЬ 5 — крепость
+        [
+          [3, 2, 3, 2, 3],
+          [2, 1, 1, 1, 2],
+          [3, 1, 3, 1, 3],
+          [2, 1, 1, 1, 2],
+          [3, 2, 3, 2, 3]
+        ],
+        // УРОВЕНЬ 6 — крепость усиленная
+        [
+          [3, 2, 3, 2, 3],
+          [2, 2, 2, 2, 2],
+          [3, 2, 3, 2, 3],
+          [2, 2, 2, 2, 2],
+          [3, 2, 3, 2, 3]
+        ],
+        // УРОВЕНЬ 7 — крепость сильная
+        [
+          [3, 3, 3, 3, 3],
+          [3, 2, 2, 2, 3],
+          [3, 2, 2, 2, 3],
+          [3, 2, 2, 2, 3],
+          [3, 3, 3, 3, 3]
+        ]
+      ];
+      
+      let bricks = [];
+      const brickColors = ["#FF6B6B", "#0095DD", "#4ECDC4", "#FFE66D", "#A8E6CF", "#C7CEEA"];
+      
+      let bonuses = [];
+      const bonusTypes = ["W", "+", "S", "$", "L"];
+      const bonusColors = { "W": "#4ECDC4", "+": "#FF6B6B", "S": "#FFE66D", "$": "#4D96FF", "L": "#FF00FF" };
+
+      let particles = [];  // массив для частиц
+      let shockwaves = [];   // массив ударных волн
+
+      let paddleWidthBonus = 0;
+      let slowBallBonus = 0;
+      let laserBonusEnd = 0;       // время окончания лазера (в мс)
+      let lasers = [];          // массив выпущенных снарядов
+      let lastShotTime = 0;     // время последнего выстрела (для ограничения темпа)
+      let paddleWidth = paddleWidthBase;
+      let paddleX = (canvas.width - paddleWidth) / 2;
+      let paddleFlash = 0;
+      
+      // НОВЫЕ ПЕРЕМЕННЫЕ ДЛЯ ИМПУЛЬСА РАКЕТКИ
+      let paddleVelocity = 0;      // Текущая скорость ракетки
+      let lastPaddleX = paddleX;   // Позиция ракетки в прошлом кадре
+      
+      let x = canvas.width / 2;
+      let y = canvas.height - 30;
+      let dx = 2;
+      let dy = -2;
+      
+      let rightPressed = false;
+      let leftPressed = false;
+      let score = 0;
+      let lives = 3;
+      let level = 1;
+      let ballStuck = true;
+      let paused = false;
+      let highScore = parseInt(localStorage.getItem("breakoutHighScore")) || 0;
+      // --- ТАБЛИЦА ЛИДЕРОВ ---
+      const LEADERBOARD_KEY = "breakoutLeaderboard";
+      let leaderboard = [];          // массив записей (максимум 10)
+      let showLeaderboard = false;   // показывать ли экран таблицы
+      let recordSaved = false;       // защита от двойного сохранения
+      let leaderboardPausedGame = false;  // остановили ли мы игру при открытии таблицы
+
+      let brickDestroyed = 0;
+      let screenShake = 0;
+
+      let currentSpeedFactor = 1; 
+
+    
+
+      // Функция загрузки уровня
+      function loadLevel(levelNumber) {
+        // Выбираем тему уровня (зацикливаем, если уровней больше тем)
+        const themeIndex = (levelNumber - 1) % THEMES.length;
+        currentTheme = THEMES[themeIndex];
+        // Если уровней больше нет — зацикливаем на последний (или можешь сделать победу)
+        const levelIndex = Math.min(levelNumber - 1, levels.length - 1);
+        const layout = levels[levelIndex];
+        
+        // Обновляем размеры сетки под текущий уровень
+        brickRowCount = layout.length;         // количество рядов
+        brickColumnCount = layout[0].length;   // количество колонок
+        
+        // Пересоздаём массив кирпичей
+        bricks = [];
+        totalBricks = 0;
+        
+        for (let r = 0; r < brickRowCount; r++) {
+          bricks[r] = [];
+          for (let c = 0; c < brickColumnCount; c++) {
+            let health = layout[r][c];
+            let moving = false;
+            
+            // Значение 4 = движущийся крепкий кирпич (прочность 3)
+            if (health === 4) {
+              health = CONFIG.moveBrickHealth;
+              moving = true;
+            }
+            
+            // Начальная позиция кирпича (нужна для движущегося)
+            const startX = c * (brickWidth + brickPadding) + brickOffsetLeft;
+            
+            bricks[r][c] = {
+              x: startX,
+              y: 0,
+              health: health,
+              maxHealth: health,
+              flash: 0,
+              moving: moving,
+              moveDir: 1,          // направление движения: 1 = вправо, -1 = влево
+              moveSpeed: CONFIG.moveBrickSpeed,      // скорость движения
+              minX: startX - (brickWidth + brickPadding),   // левая граница движения
+              maxX: startX + (brickWidth + brickPadding),    // правая граница движения
+              hitCooldown: 0,    // кулдаун на удар по объекту
+              spawnProgress: 0,              // (0 = не появился, 1 = полностью появился)
+              spawnDelay: r * 8 + c * 2      // (задержка для эффекта "волны")
+            };
+            if (health > 0) totalBricks++;
+          }
+        }
+      }
+
+      // Загружаем первый уровень при старте
+      loadLevel(1);
+
+      loadLeaderboard();   // читаем сохранённые рекорды
+
+      // --- ЗВУК ---
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Простая мелодия (ноты в герцах, 0 = пауза)
+      const MELODY = [
+        523.25, 0, 392.00, 0, 440.00, 0, 392.00, 0,    // C5 . G4 . A4 . G4 .
+        523.25, 0, 392.00, 0, 440.00, 0, 523.25, 0,    // C5 . G4 . A4 . C5 .
+        587.33, 0, 523.25, 0, 440.00, 0, 392.00, 0,    // D5 . C5 . A4 . G4 .
+        440.00, 0, 392.00, 0, 329.63, 0, 392.00, 0     // A4 . G4 . E4 . G4 .
+      ];
+
+      // Бассовая линия (играет реже, чем мелодия)
+      const BASS = [
+        130.81, 0, 0, 0, 98.00, 0, 0, 0,    // C3 . . . G2 . . .
+        130.81, 0, 0, 0, 98.00, 0, 0, 0,    // C3 . . . G2 . . .
+        146.83, 0, 0, 0, 110.00, 0, 0, 0,   // D3 . . . A2 . . .
+        110.00, 0, 0, 0, 98.00, 0, 0, 0     // A2 . . . G2 . . .
+      ];
+
+      const NOTE_DURATION = 200;   // длительность одной ноты в мс (200 мс = спокойный темп)
+
+      // Играет одну ноту музыки (тише, чем звуковые эффекты)
+      function playMusicNote(frequency, duration, type = "sine", volume = 0.05) {
+        if (!audioCtx || audioCtx.state === 'suspended') return;
+        
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        oscillator.frequency.value = frequency;
+        oscillator.type = type;
+        
+        // Плавное начало и конец ноты (чтобы не было щелчков)
+        gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(volume, audioCtx.currentTime + 0.02);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration / 1000);
+        
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + duration / 1000);
+      }
+
+      //Функция запуска музыки
+      function startMusic() {
+        if (!musicEnabled || musicPlaying) return;
+        
+        musicPlaying = true;
+        currentNoteIndex = 0;
+        
+        function playNextNote() {
+          if (!musicPlaying || !musicEnabled) return;
+          
+          // Играем ноту мелодии (если не пауза)
+          const melodyNote = MELODY[currentNoteIndex];
+          if (melodyNote > 0) {
+            playMusicNote(melodyNote, NOTE_DURATION, "sine", 0.05);
+          }
+          
+          // Играем бас (каждую 4-ю ноту)
+          if (currentNoteIndex % 4 === 0) {
+            const bassNote = BASS[currentNoteIndex];
+            if (bassNote > 0) {
+              playMusicNote(bassNote, NOTE_DURATION * 2, "triangle", 0.04);
+            }
+          }
+          
+          // Переходим к следующей ноте
+          currentNoteIndex = (currentNoteIndex + 1) % MELODY.length;
+          
+          // Планируем следующую ноту
+          musicTimer = setTimeout(playNextNote, NOTE_DURATION);
+        }
+        
+        playNextNote();
+      }
+
+      function stopMusic() {
+        musicPlaying = false;
+        if (musicTimer) {
+          clearTimeout(musicTimer);
+          musicTimer = null;
+        }
+      }
+
+      function toggleMusic() {
+        musicEnabled = !musicEnabled;
+        if (musicEnabled && gameStarted && !paused && !gameOver) {
+          startMusic();
+        } else {
+          stopMusic();
+        }
+      }
+      
+      function playSound(frequency, duration) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.frequency.value = frequency;
+        oscillator.type = "square";
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + duration);
+      }
+
+      // --- УПРАВЛЕНИЕ ---
+      document.addEventListener("keydown", keyDownHandler);
+      document.addEventListener("keyup", keyUpHandler);
+      document.addEventListener("mousemove", mouseMoveHandler);
+
+      // Тач-управление для мобильных устройств
+      canvas.addEventListener("touchstart", touchHandler, { passive: false });
+      canvas.addEventListener("touchmove", touchHandler, { passive: false });
+
+      canvas.addEventListener("click", (e) => {
+        if (showLeaderboard) return;
+        if (gameOver) { 
+          restartGame(); 
+          return; 
+        }
+
+        // Запуск игры из меню
+        if (!gameStarted) {
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const clickX = (e.clientX - rect.left) * scaleX;
+          const clickY = (e.clientY - rect.top) * scaleY;
+          
+          // Проверяем, кликнули ли по кнопке Start
+          const btnX = canvas.width / 2 - 80;
+          const btnY = 330;
+          const btnW = 160;
+          const btnH = 45;
+          
+          if (clickX >= btnX && clickX <= btnX + btnW && 
+              clickY >= btnY && clickY <= btnY + btnH) {
+            startGame();
+          }
+          return;
+        }
+        //Запуск мяча
+        // Защита: не даём запустить мяч в первые 500 мс после старта
+        if (ballStuck && (Date.now() - gameStartTime > 500)) {
+          ballStuck = false;
+          
+          // Задаём направление в зависимости от движения ракетки
+          if (paddleVelocity > 1) {
+            dx = Math.abs(dx);   // ракетка вправо → мяч вправо
+          } else if (paddleVelocity < -1) {
+            dx = -Math.abs(dx);  // ракетка влево → мяч влево
+          } else {
+            // Ракетка стояла — случайное направление
+            dx = (Math.random() > 0.5 ? 1 : -1) * Math.abs(dx);
+          }
+        }
+      });
+
+      //Обработка касания в меню и при Game Over
+      canvas.addEventListener("touchend", (e) => {
+        e.preventDefault();
+        
+        if (gameOver) {
+          restartGame();
+          return;
+        }
+        
+        if (!gameStarted) {
+          const rect = canvas.getBoundingClientRect();
+          const touch = e.changedTouches[0];
+          const clickX = (touch.clientX - rect.left) * (canvas.width / rect.width);
+          const clickY = (touch.clientY - rect.top) * (canvas.height / rect.height);
+          
+          const btnX = canvas.width / 2 - 80;
+          const btnY = 330;
+          const btnW = 160;
+          const btnH = 45;
+          
+          if (clickX >= btnX && clickX <= btnX + btnW && 
+              clickY >= btnY && clickY <= btnY + btnH) {
+            startGame();
+          }
+          return;
+        }
+      }, { passive: false }); 
+
+
+      function mouseMoveHandler(e) {
+        if (paused) return;
+        const rect = canvas.getBoundingClientRect();
+        
+        // Масштабируем координату, если канвас уменьшен
+        const scaleX = canvas.width / rect.width;
+        const relativeX = (e.clientX - rect.left) * scaleX;
+        
+        if (relativeX > 0 && relativeX < canvas.width) {
+          paddleX = relativeX - paddleWidth / 2;
+          paddleX = Math.max(0, Math.min(paddleX, canvas.width - paddleWidth));
+        }
+      }
+
+      //Обработка тачей
+      function touchHandler(e) {
+        // Отменяем стандартное поведение (прокрутку страницы)
+        e.preventDefault();
+        
+        if (paused || showLeaderboard) return;
+        
+        // Берём первый палец из списка касаний
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const relativeX = touch.clientX - rect.left;
+        
+        // Масштабируем координату, если канвас уменьшен (для адаптивности)
+        const scaleX = canvas.width / rect.width;
+        const adjustedX = relativeX * scaleX;
+        
+        if (adjustedX > 0 && adjustedX < canvas.width) {
+          paddleX = adjustedX - paddleWidth / 2;
+          paddleX = Math.max(0, Math.min(paddleX, canvas.width - paddleWidth));
+        }
+        
+        // Если это первое касание (touchstart) — запускаем мяч или стреляем
+        if (e.type === "touchstart" && gameStarted && !gameOver) {
+          if (Date.now() < laserBonusEnd) {
+            shootLaser();
+          } else if (ballStuck && (Date.now() - gameStartTime > 500)) {
+            ballStuck = false;
+            if (paddleVelocity > 1) {
+              dx = Math.abs(dx);
+            } else if (paddleVelocity < -1) {
+              dx = -Math.abs(dx);
+            } else {
+              dx = (Math.random() > 0.5 ? 1 : -1) * Math.abs(dx);
+            }
+          }
+        }
+      }
+
+      function keyDownHandler(e) {
+        // Пока открыта таблица — реагируем только на закрытие
+        if (showLeaderboard) {
+          if (e.key === "Escape" || e.key === "p" || e.key === "P" ||
+              e.key === "з" || e.key === "З") {
+            toggleLeaderboard();
+          }
+          return;
+        }
+        // Перезапуск после Game Over
+        if (gameOver && e.key === " ") {
+          restartGame();
+          return;
+        }
+        // СТРЕЛЬБА ИЗ ЛАЗЕРА
+        if (Date.now() < laserBonusEnd && e.key === " ") {
+          shootLaser();
+          return;
+        }
+        //Пауза
+        if (e.key === "p" || e.key === "P" || e.key === "з" || e.key === "З" || e.key === "Escape") {
+          paused = !paused;
+          if (paused) {
+            stopMusic();
+          } else {
+            startMusic();
+          }
+          return;
+        }
+        // Переключение музыки клавишей M
+        if (e.key === "m" || e.key === "M" || e.key === "ь" || e.key === "Ь") {
+          toggleMusic();
+          return;
+        }
+        //Управление
+        if (e.key === "Right" || e.key === "ArrowRight") rightPressed = true;
+        else if (e.key === "Left" || e.key === "ArrowLeft") leftPressed = true;
+        else if (e.key === " " && ballStuck && (Date.now() - gameStartTime > 500)) {
+          ballStuck = false;
+          // Задаём направление в зависимости от движения ракетки
+          if (paddleVelocity > 1) {
+            dx = Math.abs(dx);          // ракетка вправо → мяч вправо
+          } else if (paddleVelocity < -1) {
+            dx = -Math.abs(dx);         // ракетка влево → мяч влево
+          } else {
+            // Ракетка стояла — случайное направление
+            dx = (Math.random() > 0.5 ? 1 : -1) * Math.abs(dx);
+          }
+        }
+      }
+
+      function keyUpHandler(e) {
+        if (e.key === "Right" || e.key === "ArrowRight") rightPressed = false;
+        else if (e.key === "Left" || e.key === "ArrowLeft") leftPressed = false;
+      }
+
+      // --- ФИЗИКА И СТОЛКНОВЕНИЯ ---
+      function collisionDetection() {
+        for (let r = 0; r < brickRowCount; r++) {
+          for (let c = 0; c < brickColumnCount; c++) {
+            const b = bricks[r][c];
+            if (b.health > 0 && b.hitCooldown === 0) { //проверяем прочность и кулдаун
+              const ballLeft = x - ballRadius;
+              const ballRight = x + ballRadius;
+              const ballTop = y - ballRadius;
+              const ballBottom = y + ballRadius;
+
+              if (ballRight > b.x && ballLeft < b.x + brickWidth && ballBottom > b.y && ballTop < b.y + brickHeight) {
+                const overlapX = Math.min(ballRight, b.x + brickWidth) - Math.max(ballLeft, b.x);
+                const overlapY = Math.min(ballBottom, b.y + brickHeight) - Math.max(ballTop, b.y);
+
+                // 1. Сначала запоминаем точку удара (ПОКА x и y ещё не сдвинуты!)
+                let hitX, hitY;
+                if (overlapX < overlapY) {
+                  // Мяч ударил в БОКОВУЮ грань кирпича
+                  hitX = (ballLeft < b.x) ? b.x : b.x + brickWidth;
+                  hitY = y;
+                } else {
+                  // Мяч ударил в ВЕРХНЮЮ или НИЖНЮЮ грань
+                  hitX = x;
+                  hitY = (ballTop < b.y) ? b.y : b.y + brickHeight;
+                }
+
+                // 2. Теперь отталкиваем мяч и меняем направление
+                if (overlapX < overlapY) {
+                  dx = -dx;
+                  x = (ballLeft < b.x) ? b.x - ballRadius : b.x + brickWidth + ballRadius;
+                } else {
+                  dy = -dy;
+                  y = (ballTop < b.y) ? b.y - ballRadius : b.y + brickHeight + ballRadius;
+                }
+
+                b.health--;          // уменьшаем прочность на 1
+                b.hitCooldown = 10;   // 10 кадров = 1/6 секунды на "неуязвимость"
+                b.flash = 5;         // вспышка при ударе
+
+                if (b.health <= 0) {
+                  // Кирпич разрушен полностью
+                  score++;
+                  brickDestroyed++;
+                  // Чем крепче кирпич — тем круче взрыв
+                  const particleCount = b.maxHealth * 6;
+                  createParticles(hitX, hitY, getBrickColor(b.maxHealth, r), particleCount);
+                  
+                  // Для крепких кирпичей — ударная волна и тряска экрана
+                  if (b.maxHealth >= 2) {
+                    createShockwave(hitX, hitY, getBrickColor(b.maxHealth, r));
+                    screenShake = 6 + b.maxHealth * 2;
+                  }
+                } else {
+                  // Кирпич просто повреждён — звук тише
+                  playSound(440, 0.05);
+                }
+
+                if (Math.random() < CONFIG.bonusChance) {
+                  bonuses.push({
+                    x: b.x + brickWidth / 2,
+                    y: b.y + brickHeight / 2,
+                    type: bonusTypes[Math.floor(Math.random() * bonusTypes.length)],
+                    speed: 2
+                  });
+                }
+                playSound(660, 0.08);   
+                
+                if (brickDestroyed === totalBricks) {
+                brickDestroyed = 0;
+                updateHighScore();
+                nextLevel();
+              }
+                return; 
+              }
+            }
+          }
+        }
+      }
+
+      // Стрельба из ракетки
+      function shootLaser() {
+        const now = Date.now();
+        // Проверка: активен ли бонус + не чаще 2 выстрелов в секунду
+        if (now >= laserBonusEnd) return;   // бонус истёк
+        if (now - lastShotTime < 500) return;
+        lastShotTime = now;
+        
+        // Создаём ОДИН снаряд по центру ракетки
+        lasers.push({
+          x: paddleX + paddleWidth / 2,
+          y: canvas.height - paddleHeight,
+          speed: 10
+        });
+        
+        playSound(1500, 0.05);
+      }
+      // Движение, столкновения и отрисовка лазеров
+      function updateLasers() {
+        for (let i = lasers.length - 1; i >= 0; i--) {
+          const laser = lasers[i];
+          
+          // Движение вверх
+          laser.y -= laser.speed * currentSpeedFactor;
+          
+          // Удаление если улетел за верхнюю границу
+          if (laser.y < 0) {
+            lasers.splice(i, 1);
+            continue;
+          }
+          
+          // Проверка столкновения с кирпичами
+          let hit = false;
+          for (let r = 0; r < brickRowCount; r++) {
+            for (let c = 0; c < brickColumnCount; c++) {
+              const b = bricks[r][c];
+              if (b.health > 0) {
+                // Простая проверка попадания в прямоугольник
+                if (laser.x > b.x && laser.x < b.x + brickWidth &&
+                    laser.y > b.y && laser.y < b.y + brickHeight) {
+                  
+                  // Урон кирпичу
+                  b.health--;
+                  b.flash = 5;
+                  
+                  if (b.health <= 0) {
+                    score++;
+                    brickDestroyed++;
+                    createParticles(laser.x, laser.y, getBrickColor(b.maxHealth, r));
+                    
+                    // Проверка завершения уровня
+                    if (brickDestroyed === totalBricks) {
+                      brickDestroyed = 0;
+                      updateHighScore();
+                      nextLevel();
+                    }
+                  }
+                  playSound(880, 0.05);
+                  
+                  hit = true;
+                  break;
+                }
+              }
+            }
+            if (hit) break;
+          }
+          
+          if (hit) {
+            lasers.splice(i, 1);
+            continue;
+          }
+          
+          // Отрисовка снаряда
+          ctx.save();
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = "#FF00FF";
+          ctx.fillStyle = "#FF00FF";
+          ctx.fillRect(laser.x - 2, laser.y, 4, 12);
+          ctx.restore();
+        }
+      }
+      
+
+      // --- ОТРИСОВКА ---
+      function drawBall() { //Мяч
+        ctx.save();
+        // Мягкое свечение вокруг мяча
+        ctx.shadowBlur = 8;          // было 15, теперь меньше
+        ctx.shadowColor = currentTheme.accent; // цвет свечения совпадает с мячом
+        
+        // Градиент с МЕНЬШИМ и БОЛЕЕ МЯГКИМ бликом
+        const ballGradient = ctx.createRadialGradient(
+          x - ballRadius * 0.3, y - ballRadius * 0.3, ballRadius * 0.1,  // маленький блик
+          x, y, ballRadius
+        );
+        
+        // ВМЕСТО белого в центре — очень светлый голубой
+        ballGradient.addColorStop(0, "#FFFFFF");
+        ballGradient.addColorStop(0.3, currentTheme.accent);
+        ballGradient.addColorStop(1, shadeColor(currentTheme.accent, -60));
+        
+        ctx.beginPath();
+        ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+        ctx.fillStyle = ballGradient;
+        ctx.fill();
+        ctx.closePath();
+        
+        // Сбрасываем тень
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      }
+
+      // Функция отрисовки следа
+      function drawBallTrail() {
+        for (let i = 0; i < ballTrail.length; i++) {
+          const t = ballTrail[i];
+          // прозрачность 0.6 и размер 1.0
+          const alpha = (i / ballTrail.length) * 0.6;
+          const size = ballRadius * (i / ballTrail.length) * 1.0;
+          
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = currentTheme.accent;
+          ctx.shadowBlur = 5;   // свечение
+          ctx.shadowColor = currentTheme.accent;
+          ctx.beginPath();
+          ctx.arc(t.x, t.y, size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      function drawPaddle() {
+        ctx.save();   // ← СОХРАНЯЕМ в начале
+        
+        // Если активен лазер — подсвечиваем ракетку
+        if (Date.now() < laserBonusEnd) {
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = "#FF00FF";
+        }
+        
+        ctx.beginPath();
+        ctx.rect(paddleX, canvas.height - paddleHeight, paddleWidth, paddleHeight);
+        ctx.fillStyle = paddleFlash > 0 ? "#FFFFFF" : currentTheme.accent; // тема для ракетки
+        ctx.fill();
+        ctx.closePath();
+        
+        ctx.restore();   // ← ВОССТАНАВЛИВАЕМ в конце
+      }
+      // Вспомогательная функция для цвета кирпича
+      // Возвращает цвет кирпича в зависимости от его типа (прочности)
+      function getBrickColor(maxHealth, row) {
+        if (maxHealth === 1) {
+          return brickColors[row % brickColors.length];  // обычный — цвет по ряду
+        } else if (maxHealth === 2) {
+          return "#8899AA";  // крепкий — стальной серый
+        } else {
+          return "#FFB347";  // очень крепкий — золотистый
+        }
+      }
+      
+      // Вспомогательная функция: делает цвет темнее (отрицательный percent) или светлее (положительный)
+      function shadeColor(color, percent) {
+        percent = Math.round(percent);
+        const num = parseInt(color.replace("#", ""), 16);
+        const r = Math.min(255, Math.max(0, (num >> 16) + percent));
+        const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00FF) + percent));
+        const b = Math.min(255, Math.max(0, (num & 0x0000FF) + percent));
+        return "#" + (0x1000000 + (r << 16) + (g << 8) + b).toString(16).slice(1);
+      }
+
+      //Функция движения кирпечей
+      function updateMovingBricks() {
+        for (let r = 0; r < brickRowCount; r++) {
+          for (let c = 0; c < brickColumnCount; c++) {
+            const brick = bricks[r][c];
+            if (brick.hitCooldown > 0) brick.hitCooldown--; //обновляем кулдаун
+            // Двигаем только живые движущиеся кирпичи
+            if (brick.health > 0 && brick.moving) {
+              brick.x += brick.moveDir * brick.moveSpeed * currentSpeedFactor;
+              
+              // Отражение от границ движения
+              if (brick.x >= brick.maxX) {
+                brick.x = brick.maxX;
+                brick.moveDir = -1;   // разворачиваем влево
+              } else if (brick.x <= brick.minX) {
+                brick.x = brick.minX;
+                brick.moveDir = 1;    // разворачиваем вправо
+              }
+            }
+          }
+        }
+      }
+
+      //Функция обновления анимации
+      //Каждый кадр уменьшаем задержку, потом увеличиваем прогресс появления. * currentSpeedFactor делает анимацию независимой от FPS.
+      function updateBrickSpawns() {
+        for (let r = 0; r < brickRowCount; r++) {
+          for (let c = 0; c < brickColumnCount; c++) {
+            const brick = bricks[r][c];
+            if (brick.health > 0 && brick.spawnProgress < 1) {
+              if (brick.spawnDelay > 0) {
+                brick.spawnDelay -= currentSpeedFactor;
+              } else {
+                brick.spawnProgress += 0.04 * currentSpeedFactor;
+                if (brick.spawnProgress > 1) brick.spawnProgress = 1;
+              }
+            }
+          }
+        }
+      }
+      
+      function drawBricks() {
+        ctx.save(); // сохраняем настройки
+        for (let r = 0; r < brickRowCount; r++) {
+          for (let c = 0; c < brickColumnCount; c++) {
+            const brick = bricks[r][c];
+            if (brick.health > 0 || brick.flash > 0) {
+              let brickX;
+              if (brick.moving) {
+                brickX = brick.x;   // движущийся кирпич использует свою текущую позицию
+              } else {
+                brickX = c * (brickWidth + brickPadding) + brickOffsetLeft;
+                brick.x = brickX;
+              }
+              const brickY = r * (brickHeight + brickPadding) + brickOffsetTop;
+              brick.y = brickY;
+
+              // Создаём градиент для кирпича
+              const brickGradient = ctx.createLinearGradient(brickX, brickY, brickX, brickY + brickHeight);
+
+              const baseColor = getBrickColor(brick.maxHealth, r);
+
+              // Затемняем кирпич в зависимости от полученных повреждений
+              const damageFactor = brick.health / brick.maxHealth;  // 1.0 = целый, меньше = повреждён
+
+              if (brick.flash > 0) {
+                brickGradient.addColorStop(0, "#FFFFFF");
+                brickGradient.addColorStop(1, "#DDDDDD");
+              } else {
+                // Чем больше повреждений, тем темнее кирпич
+                brickGradient.addColorStop(0, shadeColor(baseColor, 20 * damageFactor));
+                brickGradient.addColorStop(0.5, shadeColor(baseColor, -20 * (1 - damageFactor)));
+                brickGradient.addColorStop(1, shadeColor(baseColor, -50));
+              }
+
+              // ВАЖНО: сначала отключаем ВСЕ эффекты перед отрисовкой
+              ctx.shadowBlur = 0;
+              ctx.shadowOffsetX = 0;
+              ctx.shadowOffsetY = 0;
+
+              // Рисуем сам кирпич с градиентом
+              // АНИМАЦИЯ ПОЯВЛЕНИЯ / Пока кирпич появляется, он рисуется с прозрачностью и сдвигом вниз. Когда spawnProgress = 1 — рисуется нормально.
+              if (brick.spawnProgress < 1) {
+                ctx.save();
+                // Прозрачность: от 0 до 1
+                ctx.globalAlpha = brick.spawnProgress;
+                // Сдвиг: кирпич "выезжает" снизу
+                const yOffset = (1 - brick.spawnProgress) * 25;
+                
+                ctx.beginPath();
+                ctx.rect(brickX, brickY + yOffset, brickWidth, brickHeight);
+                ctx.fillStyle = brickGradient;
+                ctx.fill();
+                ctx.closePath();
+                ctx.restore();
+              } else {
+                // Кирпич полностью появился — рисуем как обычно
+                ctx.beginPath();
+                ctx.rect(brickX, brickY, brickWidth, brickHeight);
+                ctx.fillStyle = brickGradient;
+                ctx.fill();
+                ctx.closePath();
+              }
+
+              // Теперь добавляем тонкую тень ПОД кирпичом (не вокруг!)
+              ctx.shadowBlur = 4;
+              ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+              ctx.shadowOffsetX = 0;
+              ctx.shadowOffsetY = 2;  // тень только СНИЗУ
+
+              // Обводка сверху градиента (тонкая тёмная линия)
+              ctx.beginPath();
+              ctx.rect(brickX, brickY, brickWidth, brickHeight);
+              ctx.strokeStyle = shadeColor(baseColor, -60);
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+              ctx.closePath();
+
+              // Блик сверху (тонкая светлая линия для "стеклянного" эффекта)
+              ctx.beginPath();
+              ctx.moveTo(brickX + 2, brickY + 2);
+              ctx.lineTo(brickX + brickWidth - 2, brickY + 2);
+              ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+              ctx.lineWidth = 1;
+              ctx.stroke();
+              ctx.closePath();
+
+              // Сбрасываем тень в конце
+              ctx.shadowBlur = 0;
+              
+              if (brick.flash > 0) brick.flash--;
+            }
+          }
+        }
+        ctx.restore(); //восстанавливаем настройки
+      }
+
+      //функция создания частиц 
+      function createParticles(x, y, color, count = 8) {
+        for (let i = 0; i < count; i++) {
+          particles.push({
+            x: x,
+            y: y,
+            dx: (Math.random() - 0.5) * 10,
+            dy: (Math.random() - 0.5) * 10,
+            life: 60,
+            color: color
+          });
+        }
+      }
+
+      //Функция ударной волны
+      function createShockwave(x, y, color) {
+        shockwaves.push({
+          x: x,
+          y: y,
+          radius: 5,
+          life: 1,
+          color: color
+        });
+      }
+
+      function drawShockwaves() {
+        for (let i = shockwaves.length - 1; i >= 0; i--) {
+          const sw = shockwaves[i];
+          
+          sw.radius += 3 * currentSpeedFactor;
+          sw.life -= 0.05 * currentSpeedFactor;
+          
+          if (sw.life <= 0) {
+            shockwaves.splice(i, 1);
+            continue;
+          }
+          
+          ctx.save();
+          ctx.globalAlpha = sw.life * 0.6;
+          ctx.strokeStyle = sw.color;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      //Функции создания и отрисовки вспышек
+      // Создаём вспышку в месте отскока от стены
+      function createWallFlash(x, y) {
+        wallFlashes.push({
+          x: x,
+          y: y,
+          radius: 5,
+          life: 1,
+          color: currentTheme.accent
+        });
+      }
+
+      // Отрисовка вспышек на стенах
+      function drawWallFlashes() {
+        for (let i = wallFlashes.length - 1; i >= 0; i--) {
+          const flash = wallFlashes[i];
+          
+          flash.radius += 3 * currentSpeedFactor;
+          flash.life -= 0.08 * currentSpeedFactor;
+          
+          if (flash.life <= 0) {
+            wallFlashes.splice(i, 1);
+            continue;
+          }
+          
+          ctx.save();
+          ctx.globalAlpha = flash.life * 0.8;
+          ctx.strokeStyle = flash.color;
+          ctx.lineWidth = 3;
+          ctx.shadowBlur = 20;
+          ctx.shadowColor = flash.color;
+          ctx.beginPath();
+          ctx.arc(flash.x, flash.y, flash.radius, 0, Math.PI * 2);
+          ctx.stroke();
+          
+          // Внутреннее кольцо (более яркое)
+          ctx.globalAlpha = flash.life * 0.4;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(flash.x, flash.y, flash.radius * 0.5, 0, Math.PI * 2);
+          ctx.stroke();
+          
+          ctx.restore();
+        }
+      }
+
+      //функция отрисовки и обновления частиц
+      function drawParticles() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          
+          // Движение частицы
+          p.x += p.dx * currentSpeedFactor;
+          p.y += p.dy * currentSpeedFactor;
+          p.dy += 0.3;  // гравитация — частицы падают вниз
+          
+          // Уменьшаем размер с течением времени
+          const size = 4 * (p.life / 60);
+          
+          // Рисуем частицу
+          ctx.beginPath();
+          ctx.rect(p.x - size/2, p.y - size/2, size, size);
+          ctx.fillStyle = p.color;
+          ctx.fill();
+          ctx.closePath();
+          
+          // Уменьшаем время жизни
+          p.life--;
+          
+          // Удаляем мертвые частицы
+          if (p.life <= 0) {
+            particles.splice(i, 1);
+          }
+        }
+      }
+
+      function drawBonuses() {
+        ctx.save();
+        for (let i = bonuses.length - 1; i >= 0; i--) {
+          const bonus = bonuses[i];
+          bonus.y += bonus.speed * currentSpeedFactor;   
+
+          if (bonus.y > canvas.height) {
+            bonuses.splice(i, 1);
+            continue;
+          }
+
+          ctx.beginPath();
+          ctx.rect(bonus.x - 10, bonus.y - 10, 20, 20);
+          ctx.fillStyle = bonusColors[bonus.type];
+          ctx.fill();
+          ctx.closePath();
+
+          ctx.font = "bold 14px Arial";
+          ctx.fillStyle = "#fff";
+          ctx.textAlign = "center";
+          ctx.fillText(bonus.type, bonus.x, bonus.y + 5);
+        }
+        ctx.restore();
+      }
+
+      function checkBonusCatch() {
+        for (let i = bonuses.length - 1; i >= 0; i--) {
+          const bonus = bonuses[i];
+          if (bonus.y + 10 >= canvas.height - paddleHeight && bonus.x > paddleX && bonus.x < paddleX + paddleWidth) {
+            applyBonus(bonus.type);
+            bonuses.splice(i, 1);
+          }
+        }
+      }
+
+      function applyBonus(type) {
+        if (type === "W") { paddleWidthBonus = 360; playSound(880, 0.1); }
+        else if (type === "+") { lives++; playSound(1100, 0.15); }
+        else if (type === "S") { slowBallBonus = 180; playSound(440, 0.15); }
+        else if (type === "$") { score += 50; playSound(1320, 0.15); }
+        else if (type === "L") {
+          laserBonusEnd = Date.now() + 5000;   // 5 секунд от текущего момента
+          playSound(1200, 0.15);
+}
+      }
+
+      function drawText(text, xPos, yPos, color = "#0095DD", size = "16px") {
+        ctx.font = `${size} Arial`;
+        ctx.fillStyle = color;
+        ctx.fillText(text, xPos, yPos);
+      }
+
+      //Таблица лидеров
+      function drawLeaderboard() {
+        // Фон
+        const bg = ctx.createRadialGradient(
+          canvas.width / 2, canvas.height / 2, 50,
+          canvas.width / 2, canvas.height / 2, canvas.width / 2
+        );
+        bg.addColorStop(0, "#2a2a40");
+        bg.addColorStop(1, "#0d0d1a");
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Заголовок
+        ctx.textAlign = "center";
+        ctx.font = "bold 32px Arial";
+        ctx.fillStyle = "#FFE66D";
+        ctx.fillText("РЕКОРДЫ", canvas.width / 2, 45);
+
+        if (leaderboard.length === 0) {
+          // Таблица пустая
+          ctx.font = "20px Arial";
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillText("Пока пусто", canvas.width / 2, 180);
+
+          ctx.font = "14px Arial";
+          ctx.fillStyle = "#AAAAAA";
+          ctx.fillText("Сыграй первую игру — и попади в топ!", canvas.width / 2, 210);
+        } else {
+          // Заголовки колонок
+          ctx.font = "bold 13px Arial";
+          ctx.fillStyle = "#4ECDC4";
+          ctx.textAlign = "left";
+          ctx.fillText("#", 25, 80);
+          ctx.fillText("ОЧКИ", 200, 80);
+          ctx.fillText("УРОВ.", 300, 80);
+          ctx.fillText("ДАТА", 380, 80);
+
+          // Строки таблицы
+          for (let i = 0; i < leaderboard.length; i++) {
+            const rec = leaderboard[i];
+            const rowY = 108 + i * 25;
+
+            // Подсвечиваем первое место
+            if (i === 0) {
+              ctx.fillStyle = "rgba(255, 230, 109, 0.12)";
+              ctx.fillRect(20, rowY - 17, canvas.width - 40, 23);
+            }
+
+            ctx.font = (i === 0 ? "bold " : "") + "15px Arial";
+            ctx.fillStyle = i === 0 ? "#FFE66D" : "#FFFFFF";
+            ctx.textAlign = "left";
+
+            //Отрисовка строк
+            ctx.fillText(String(i + 1), 25, rowY);
+            ctx.fillText(String(rec.score), 200, rowY);
+            ctx.fillText(String(rec.level), 300, rowY);
+            ctx.fillText(rec.date || "", 380, rowY);
+          }
+        }
+
+        // Подсказка внизу
+        ctx.textAlign = "center";
+        ctx.font = "14px Arial";
+        ctx.fillStyle = "#4ECDC4";
+        ctx.fillText("Нажми кнопку ещё раз, чтобы вернуться", canvas.width / 2, 380);
+      }
+
+      // --- ГЛАВНЫЙ ЦИКЛ ---
+      let animationId;
+      let lastTime = 0;
+
+      function startGame() {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        gameStarted = true;
+        document.getElementById("resetButton").style.display = "block";
+        gameStartTime = Date.now();
+        recordSaved = false;
+        startMusic();
+      }
+
+      function gameLoop(timestamp) {
+        if (!lastTime) lastTime = timestamp;
+        const deltaTime = timestamp - lastTime;
+        lastTime = timestamp;
+
+        currentSpeedFactor = deltaTime / 16.6; 
+
+        draw(currentSpeedFactor);
+        animationId = requestAnimationFrame(gameLoop);
+      }
+
+      function draw(speedFactor) {
+        ctx.save(); 
+        // ТАБЛИЦА ЛИДЕРОВ — рисуется поверх всего
+        if (showLeaderboard) {
+          drawLeaderboard();
+          ctx.restore();
+          return;
+        }
+
+        // Стартовое меню
+        if (!gameStarted) {
+          // Красивый фон с градиентом
+          const bgGrad = ctx.createRadialGradient(
+            canvas.width / 2, canvas.height / 2, 50,
+            canvas.width / 2, canvas.height / 2, canvas.width / 2
+          );
+          bgGrad.addColorStop(0, "#2a2a40");
+          bgGrad.addColorStop(1, "#0d0d1a");
+          ctx.fillStyle = bgGrad;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          ctx.textAlign = "center";
+          
+          // Заголовок
+          ctx.font = "bold 48px Arial";
+          ctx.fillStyle = "#00FFFF";
+          ctx.shadowBlur = 20;
+          ctx.shadowColor = "#00FFFF";
+          ctx.fillText("BREAKOUT", canvas.width / 2, 120);
+          
+          // Подзаголовок
+          ctx.shadowBlur = 0;
+          ctx.font = "18px Arial";
+          ctx.fillStyle = "#4ECDC4";
+          ctx.fillText("Классический арканоид", canvas.width / 2, 150);
+          
+          // Инструкции
+          ctx.font = "14px Arial";
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillText("🖱️ Мышь — управление ракеткой", canvas.width / 2, 190);
+          ctx.fillText("⬅️ ➡️ Стрелки — альтернативное управление", canvas.width / 2, 215);
+          ctx.fillText("ПРОБЕЛ / КЛИК — запустить мяч", canvas.width / 2, 240);
+          ctx.fillText("ПРОБЕЛ — стрельба (при бонусе Лазер)", canvas.width / 2, 265);
+          ctx.fillText("P или ESC — пауза", canvas.width / 2, 290);
+          //индикатор музыки в меню
+          ctx.fillText("M — вкл/выкл музыку", canvas.width / 2, 315);
+          
+          // Кнопка Start
+          const btnX = canvas.width / 2 - 80;
+          const btnY = 330;
+          const btnW = 160;
+          const btnH = 45;
+          
+          ctx.fillStyle = "#0095DD";
+          ctx.fillRect(btnX, btnY, btnW, btnH);
+          ctx.strokeStyle = "#FFFFFF";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(btnX, btnY, btnW, btnH);
+          
+          ctx.font = "bold 20px Arial";
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillText("START GAME", canvas.width / 2, btnY + 30);
+          
+          // Рекорд
+          ctx.font = "14px Arial";
+          ctx.fillStyle = "#FFE66D";
+          ctx.fillText("Рекорд: " + highScore, canvas.width / 2, 390);
+          
+          ctx.textAlign = "start";
+          ctx.restore();
+          return;
+        }
+
+        // Красивый фон с радиальным градиентом
+        const bgGradient = ctx.createRadialGradient(
+          canvas.width / 2, canvas.height / 2, 50,      // центр и малый радиус
+          canvas.width / 2, canvas.height / 2, canvas.width / 2  // большой радиус
+        );
+        bgGradient.addColorStop(0, currentTheme.bgCenter); //цвет центра
+        bgGradient.addColorStop(1, currentTheme.bgEdge); //цвет краев
+        ctx.fillStyle = bgGradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        if (screenShake > 0) {
+          ctx.translate((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4);
+          screenShake--;
+        }
+
+        if (paused) {
+          ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          ctx.textAlign = "center";
+          ctx.font = "bold 40px Arial";
+          ctx.fillStyle = "#0095DD";
+          ctx.fillText("PAUSED", canvas.width / 2, canvas.height / 2);
+          
+          // Показываем причину паузы
+          ctx.font = "16px Arial";
+          ctx.fillStyle = "#FFFFFF";
+          if (document.hidden) {
+            ctx.fillText("Вкладка свёрнута — вернись в игру", canvas.width / 2, canvas.height / 2 + 40);
+          } else {
+            ctx.fillText("Нажми P или ESC чтобы продолжить", canvas.width / 2, canvas.height / 2 + 40);
+          }
+          
+          ctx.textAlign = "start";
+          ctx.restore();
+          return; 
+        }
+
+        // Экран Game Over
+        if (gameOver) {
+          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          ctx.textAlign = "center";
+          ctx.font = "bold 40px Arial";
+          ctx.fillStyle = "#FF6B6B";
+          ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 40);
+          
+          ctx.font = "20px Arial";
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillText("Score: " + score, canvas.width / 2, canvas.height / 2);
+          ctx.fillText("Best: " + highScore, canvas.width / 2, canvas.height / 2 + 30);
+          
+          ctx.font = "16px Arial";
+          ctx.fillStyle = "#4ECDC4";
+          ctx.fillText("Нажми ПРОБЕЛ или кликни, чтобы сыграть снова", canvas.width / 2, canvas.height / 2 + 70);
+          ctx.textAlign = "start";
+          
+          ctx.restore();
+          return;
+        }
+
+        updateBrickSpawns();
+        updateMovingBricks();
+        drawBricks();
+        drawBallTrail(); // след от мяча
+        drawBall();
+        updateLasers();   //Лазеры
+        drawPaddle();
+        drawBonuses();
+        drawParticles();
+        drawShockwaves(); //отрисовка волн
+        drawWallFlashes(); //вспышки на стенах
+        
+        drawText("Score: " + score, 8, 20);
+        // Отладочная информация (только для тестирования)
+        const currentSpeed = Math.hypot(dx, dy);
+        drawText(`Speed: ${currentSpeed.toFixed(1)}`, 8, canvas.height - 10, "#FF6B6B", "12px");
+        drawText("Lives: " + lives, canvas.width - 65, 20);
+        drawText("Level: " + level, canvas.width / 2 - 30, 20);
+        drawText("Best: " + highScore, canvas.width / 2 - 30, 40);
+
+        collisionDetection();
+        checkBonusCatch();
+
+        if (paddleFlash > 0) paddleFlash--;
+
+        // 1. Движение мяча
+        if (ballStuck) {
+          x = paddleX + paddleWidth / 2;
+          y = canvas.height - paddleHeight - ballRadius;
+        } else {
+          const speedMultiplier = slowBallBonus > 0 ? 0.5 : 1;
+          
+          const moveX = dx * speedFactor * speedMultiplier;
+          const moveY = dy * speedFactor * speedMultiplier;
+
+          // ПРОВЕРКА СТОЛКНОВЕНИЙ СО СТЕНАМИ
+          // Удар о правую стену (только если мяч летит вправо!)
+          if (x + moveX > canvas.width - ballRadius && dx > 0) {
+            dx = -dx;
+            x = canvas.width - ballRadius - 1;   // ← ВЫТАЛКИВАЕМ мяч из стены
+            createWallFlash(canvas.width - ballRadius, y);
+            playSound(330, 0.05);
+          } 
+          // Удар о левую стену (только если мяч летит влево!)
+          else if (x + moveX < ballRadius && dx < 0) {
+            dx = -dx;
+            x = ballRadius + 1;                  // ← ВЫТАЛКИВАЕМ мяч из стены
+            createWallFlash(ballRadius, y);
+            playSound(330, 0.05);
+          }
+
+          // Удар о потолок (только если мяч летит вверх!)
+          if (y + moveY < ballRadius && dy < 0) {
+            dy = -dy;
+            y = ballRadius + 1;                  // ← ВЫТАЛКИВАЕМ мяч из потолка
+            createWallFlash(x, ballRadius);
+            playSound(330, 0.05);
+          }
+          else if (y + moveY > canvas.height - ballRadius && dy > 0) {
+            if (x > paddleX && x < paddleX + paddleWidth) {
+
+              // ОТЛАДКА: выводим состояние в момент удара
+              // console.log("=== УДАР О РАКЕТКУ ===");
+              // console.log("y мяча:", y);
+              // console.log("Граница ракетки:", canvas.height - paddleHeight);
+              // console.log("Мяч должен быть на:", canvas.height - paddleHeight - ballRadius);
+              // console.log("Разница:", y - (canvas.height - paddleHeight - ballRadius));
+              // console.log("dy:", dy);
+              // console.log("Провалился на:", Math.max(0, y - (canvas.height - paddleHeight - ballRadius)));
+              // console.log("======================");
+
+              // ВАЖНО: Выталкиваем мяч НАД ракетку (на 1 пиксель выше)
+              y = canvas.height - paddleHeight - ballRadius - 1;
+
+              // ПРОДВИНУТАЯ ФИЗИКА + ИМПУЛЬС РАКЕТКИ
+              let collidePoint = x - (paddleX + paddleWidth / 2);
+              collidePoint = collidePoint / (paddleWidth / 2);
+
+              let angle = collidePoint * (Math.PI / 3);
+              let speed = getBallSpeed();
+
+              // ДОБАВЛЯЕМ ИМПУЛЬС РАКЕТКИ!
+              // paddleVelocity может быть положительным (движение вправо) или отрицательным (влево)
+              // Мы добавляем часть скорости ракетки к горизонтальной скорости мяча
+              dx = speed * Math.sin(angle) + paddleVelocity * 0.3; // 0.3 = сила влияния (40%)
+              dy = -speed * Math.cos(angle) + paddleVelocity * 0.3;
+
+              paddleFlash = 5;
+              playSound(440, 0.1);
+              //блок потери жизни
+            } else {
+              lives--;
+              ballTrail.length = 0;
+              screenShake = 10;
+              playSound(150, 0.4);
+              if (!lives) {
+                updateHighScore();
+                saveGameRecord();   // ← добавляем игру в таблицу
+                stopMusic();
+                gameOver = true;
+              } else {
+                x = canvas.width / 2;
+                y = canvas.height - 30;
+                const speed = getBallSpeed();
+                dx = speed;
+                dy = -speed;
+                paddleX = (canvas.width - paddleWidth) / 2;
+                ballStuck = true;
+              }
+            }
+          }
+          //движение мяча по x,y
+          x += moveX;
+          y += moveY;
+          // Добавляем текущую позицию в след от мяча
+          ballTrail.push({ x: x, y: y });
+          // Ограничиваем длину следа
+          if (ballTrail.length > TRAIL_LENGTH) {
+            ballTrail.shift();   // удаляем самую старую позицию
+          }
+        }
+
+        // Движение ракетки
+        if (rightPressed) paddleX = Math.min(paddleX + 7 * speedFactor, canvas.width - paddleWidth);
+        else if (leftPressed) paddleX = Math.max(paddleX - 7 * speedFactor, 0);
+
+        // ВЫЧИСЛЯЕМ СКОРОСТЬ РАКЕТКИ
+        // paddleVelocity = сколько пикселей ракетка проехала с прошлого кадра
+        paddleVelocity = paddleX - lastPaddleX;
+        lastPaddleX = paddleX;
+
+        // Таймеры бонусов
+        if (paddleWidthBonus > 0) {
+          paddleWidthBonus--;
+          paddleWidth = paddleWidthBase * 1.5;
+        } else {
+          paddleWidth = paddleWidthBase;
+        }
+        if (slowBallBonus > 0) slowBallBonus--;
+        
+        paddleX = Math.max(0, Math.min(paddleX, canvas.width - paddleWidth));
+
+        ctx.restore(); 
+      }
+
+      // Обновляем рекорд и сохраняем в браузер
+      function updateHighScore() {
+        if (score > highScore) {
+          highScore = score;
+          localStorage.setItem("breakoutHighScore", highScore);
+        }
+      }
+
+
+      // Функции чтения и записи
+      // Читаем таблицу из браузера (с защитой от битых данных)
+      function loadLeaderboard() {
+        try {
+          const raw = localStorage.getItem(LEADERBOARD_KEY);
+          const data = raw ? JSON.parse(raw) : [];
+
+          // Проверяем, что это массив и что у записей есть очки
+          leaderboard = Array.isArray(data)
+            ? data.filter(r => r && typeof r.score === "number")
+            : [];
+
+          // Сортируем по очкам (от больших к меньшим) и оставляем 10
+          leaderboard.sort((a, b) => b.score - a.score);
+          leaderboard = leaderboard.slice(0, 10);
+        } catch (e) {
+          // Если в localStorage что-то сломано — начинаем с чистой таблицы
+          console.warn("Не удалось прочитать таблицу лидеров:", e);
+          leaderboard = [];
+        }
+      }
+
+
+      //Функция открытия/закрытия таблицы
+      function toggleLeaderboard() {
+        showLeaderboard = !showLeaderboard;
+        const btn = document.getElementById("leaderboardButton");
+
+        if (showLeaderboard) {
+          // Запоминаем, что игра была активной — её нужно будет возобновить
+          leaderboardPausedGame = gameStarted && !gameOver && !paused;
+
+          if (leaderboardPausedGame) {
+            paused = true;
+          }
+          stopMusic();
+          btn.textContent = "✕ Закрыть";
+        } else {
+          btn.textContent = "🏆 Рекорды";
+
+          // Возобновляем игру только если это МЫ поставили её на паузу
+          if (leaderboardPausedGame && gameStarted && !gameOver) {
+            paused = false;
+            startMusic();
+          }
+          leaderboardPausedGame = false;
+        }
+      }
+
+      // Сохраняет результат завершённой игры в рекорд
+      function saveGameRecord() {
+        if (recordSaved) return;
+        recordSaved = true;
+
+        if (score <= 0) return;
+
+        leaderboard.push({
+          score: score,
+          level: level,
+          date: new Date().toLocaleDateString("ru-RU")
+        });
+
+        leaderboard.sort((a, b) => b.score - a.score);
+        leaderboard = leaderboard.slice(0, 10);
+
+        try {
+          localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(leaderboard));
+        } catch (e) {
+          console.warn("Не удалось сохранить рекорд:", e);
+        }
+      }
+      
+
+      // Скорость шарика растёт с каждым уровнем
+      function getBallSpeed() {
+        const baseSpeed = CONFIG.ballBaseSpeed + (level - 1) * CONFIG.speedPerLevel;
+        const maxSpeed = 10;
+        
+        // Если скорость меньше 80% от максимума — растём линейно
+        // Если больше — замедляем рост (асимптотически приближаемся к 10)
+        if (baseSpeed < maxSpeed * 0.8) {
+          return baseSpeed;
+        } else {
+          return maxSpeed - (maxSpeed - baseSpeed) * 0.5;
+        }
+      }
+
+      //Функция перезапуска
+      function restartGame() {
+        score = 0;
+        lives = 3;
+        level = 1;
+        brickDestroyed = 0;
+        bonuses.length = 0;
+        particles.length = 0;
+        paddleWidthBonus = 0;
+        slowBallBonus = 0;
+        wallFlashes.length = 0;
+        ballTrail.length = 0;
+        shockwaves.length = 0;
+        paddleWidth = paddleWidthBase;
+        gameOver = false;
+        paused = false;
+        recordSaved = false;
+        showLeaderboard = false;
+        document.getElementById("leaderboardButton").textContent = "🏆 Рекорды";
+        loadLevel(1);
+        
+        const speed = getBallSpeed();
+        x = canvas.width / 2;
+        y = canvas.height - 30;
+        dx = speed;
+        dy = -speed;
+        paddleX = (canvas.width - paddleWidth) / 2;
+        ballStuck = true;
+        gameStarted = false;
+        gameStartTime = Date.now(); //Защита от быстрых кликов при новом старте
+        stopMusic();   // музыка остановится, запустится при новом старте
+      }
+
+      function nextLevel() {
+        level++;
+        //очистка перед сл уровнем
+        lasers.length = 0;
+        laserBonusEnd = 0;
+        brickDestroyed = 0;
+        bonuses.length = 0;
+        particles.length = 0; // очистка частиц при переходе на нов уровень
+        paddleWidthBonus = 0;
+        slowBallBonus = 0;
+        wallFlashes.length = 0;
+        ballTrail.length = 0;
+        shockwaves.length = 0; //Очистка волн при переходе уровня
+        paddleWidth = paddleWidthBase;
+
+        playSound(880, 0.15);
+        setTimeout(() => playSound(1100, 0.15), 150);
+        setTimeout(() => playSound(1320, 0.3), 300);
+        
+        loadLevel(level); //загружаем новый уровень из макета
+
+        x = canvas.width / 2;
+        y = canvas.height - 30;
+        const speed = getBallSpeed();
+        dx = speed;
+        dy = -speed;
+        paddleX = (canvas.width - paddleWidth) / 2;
+        ballStuck = true;
+        
+        paused = true;
+        let levelMessageFrames = 120;
+        
+        function showLevelUp() {
+          if (levelMessageFrames > 0) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = "bold 40px Arial";
+            ctx.fillStyle = "#FFE66D";
+            ctx.textAlign = "center";
+            ctx.fillText("LEVEL " + level, canvas.width / 2, canvas.height / 2);
+            ctx.textAlign = "start";
+            
+            levelMessageFrames--;
+            requestAnimationFrame(showLevelUp);
+          } else {
+            paused = false;
+            startMusic();   // музыка возобновляется
+          }
+        }
+        stopMusic();   // музыка останавливается на время показа "LEVEL X"
+        showLevelUp();
+      }
+
+    // ================= ОТЛАДКА =================
+    // Перейти на конкретный уровень (для быстрого тестирования)
+    function jumpToLevel(n) {
+      level = n;
+      brickDestroyed = 0;
+      bonuses.length = 0;
+      particles.length = 0;
+      if (typeof lasers !== 'undefined') lasers.length = 0;
+      paddleWidthBonus = 0;
+      slowBallBonus = 0;
+      wallFlashes.length = 0;
+      ballTrail.length = 0;
+      shockwaves.length = 0;
+      if (typeof laserBonusEnd !== 'undefined') laserBonusEnd = 0;
+      paddleWidth = paddleWidthBase;
+      paddleVelocity = 0;
+      
+      loadLevel(n);
+      
+      const speed = getBallSpeed();
+      x = canvas.width / 2;
+      y = canvas.height - 30;
+      dx = speed;
+      dy = -speed;
+      paddleX = (canvas.width - paddleWidth) / 2;
+      ballStuck = true;
+      
+      gameStarted = true;
+      recordSaved = false;   // новая игра — можно сохранить новый результат
+      paused = false;
+      gameOver = false;
+      
+      console.log(`✅ Уровень ${n}, скорость: ${speed.toFixed(2)}`);
+    }
+
+    // Мгновенно завершить текущий уровень
+    function winLevel() {
+      for (let r = 0; r < brickRowCount; r++) {
+        for (let c = 0; c < brickColumnCount; c++) {
+          bricks[r][c].health = 0;
+        }
+      }
+      brickDestroyed = 0;
+      updateHighScore();
+      nextLevel();
+      console.log(`✅ Уровень завершён, переход на ${level}`);
+    }
+
+    // Дать неуязвимость
+    function godMode() {
+      lives = 999;
+      console.log(`✅ God mode ON! Жизней: ${lives}`);
+    }
+
+    // Дать все бонусы сразу
+    function giveAllBonuses() {
+      applyBonus("W");
+      applyBonus("S");
+      if (typeof applyBonus === 'function') {
+        applyBonus("$");
+        applyBonus("+");
+      }
+      console.log(`✅ Все бонусы активированы`);
+    }
+    // ===========================================  
+
+      const runButton = document.getElementById("runButton");
+      runButton.style.display = "none";   // скрываем её
+      document.getElementById("resetButton").style.display = "none";
+
+      //Очищаем таблицу лидеров и бестскор
+      document.getElementById("resetButton").addEventListener("click", () => {
+        localStorage.removeItem("breakoutHighScore");
+        localStorage.removeItem(LEADERBOARD_KEY);
+        highScore = 0;
+        leaderboard = [];
+      });
+      // Запускаем игровой цикл СРАЗУ при загрузке страницы
+      // Это нужно, чтобы рисовать меню до начала игры
+      lastTime = 0;
+      requestAnimationFrame(gameLoop);
+
+      // Автоматическая пауза при сворачивании вкладки
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden && gameStarted && !gameOver) {
+          paused = true;
+        }
+      });
+      // Пауза при клике на другое окно
+      window.addEventListener("blur", () => {
+        if (gameStarted && !gameOver) {
+          paused = true;
+          stopMusic();
+        }
+      });
+
+
+
+      // Кнопка паузы для мобильных
+      document.getElementById("pauseButton").addEventListener("click", () => {
+        if (!gameStarted || gameOver) return;
+        paused = !paused;
+        if (paused) {
+          stopMusic();
+          document.getElementById("pauseButton").textContent = "▶ Продолжить";
+        } else {
+          startMusic();
+          document.getElementById("pauseButton").textContent = "⏸ Пауза";
+        }
+      });
+
+      // Кнопка таблицы лидеров
+      document.getElementById("leaderboardButton").addEventListener("click", () => {
+        toggleLeaderboard();
+      });
+
+
+      //Для отладки
+      // jumpToLevel(5)     // прыгнуть на уровень
+      // winLevel()         // мгновенно пройти уровень
+      // godMode()          // 999 жизней
+      // giveAllBonuses()   // все бонусы сразу
+    </script>
+  </body>
+</html>
