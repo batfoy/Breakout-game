@@ -93,6 +93,43 @@
         display: none;
       }
 
+      #soundButton {
+        background: rgba(78, 205, 196, 0.3);
+        color: #4ECDC4;
+        border: 2px solid #4ECDC4;
+        border-radius: 50%;   /* круглая кнопка */
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        font-size: 18px;
+        line-height: 1;
+      }
+
+      #soundButton.sound-off {
+        background: rgba(255, 107, 107, 0.3);
+        color: #FF6B6B;
+        border-color: #FF6B6B;
+      }
+
+      /* Позиционирование в правом нижнем углу */
+      #soundButton {
+        position: fixed;
+        bottom: 60px;
+        right: 20px;
+        z-index: 200;   /* поверх всего */
+      }
+
+      /* На маленьких экранах — ещё выше, чтобы не перекрывал другие кнопки */
+      @media (max-width: 400px) {
+        #soundButton {
+          bottom: 80px;
+          right: 15px;
+          width: 35px;
+          height: 35px;
+          font-size: 16px;
+        }
+      }
+
       
       /* На очень маленьких экранах делаем кнопки компактнее */
       @media (max-width: 400px) {
@@ -104,12 +141,13 @@
     </style>
   </head>
   <body>
-    <canvas id="myCanvas" width="480" height="400"></canvas>
+    <canvas id="myCanvas" width="480" height="440"></canvas>
     <div class="controls">
       <button id="runButton">Start game</button>
       <button id="resetButton">Reset Record</button>
       <button id="leaderboardButton">🏆 Рекорды</button>
       <button id="pauseButton">⏸ Пауза</button>
+      <button id="soundButton">🔊</button>
     </div>
 
     <script>
@@ -155,7 +193,7 @@
       
       // --- НАСТРОЙКИ ИГРЫ ---
       const ballRadius = 10;
-      const paddleHeight = 10;
+      const paddleHeight = 15;
       const paddleWidthBase = 75;
       const brickWidth = 75;
       const brickHeight = 20;
@@ -171,6 +209,7 @@
       let gameStarted = false;
       let gameStartTime = 0;   // время, когда игра была запущена
       let wallFlashes = [];   // массив вспышек на стенах
+      let fireBallEnd = 0;   // время окончания огненного мяча
 
       // --- ФОНОВАЯ МУЗЫКА ---
       let musicEnabled = true;      // включена ли музыка
@@ -243,27 +282,35 @@
       const brickColors = ["#FF6B6B", "#0095DD", "#4ECDC4", "#FFE66D", "#A8E6CF", "#C7CEEA"];
       
       let bonuses = [];
-      const bonusTypes = ["W", "+", "S", "$", "L"];
-      const bonusColors = { "W": "#4ECDC4", "+": "#FF6B6B", "S": "#FFE66D", "$": "#4D96FF", "L": "#FF00FF" };
+      const bonusTypes = ["W", "+", "S", "$", "L", "F"];  
+      const bonusColors = { 
+        "W": "#4ECDC4", 
+        "+": "#FF6B6B", 
+        "S": "#FFE66D", 
+        "$": "#4D96FF", 
+        "L": "#FF00FF",
+        "F": "#FF6600"  
+      };
 
       let particles = [];  // массив для частиц
       let shockwaves = [];   // массив ударных волн
 
-      let paddleWidthBonus = 0;
-      let slowBallBonus = 0;
+      let paddleWidthEnd = 0;   // время окончания бонуса W (в мс)
+      let slowBallEnd = 0;       // время окончания бонуса S (в мс)
       let laserBonusEnd = 0;       // время окончания лазера (в мс)
       let lasers = [];          // массив выпущенных снарядов
       let lastShotTime = 0;     // время последнего выстрела (для ограничения темпа)
       let paddleWidth = paddleWidthBase;
       let paddleX = (canvas.width - paddleWidth) / 2;
       let paddleFlash = 0;
+
       
       // НОВЫЕ ПЕРЕМЕННЫЕ ДЛЯ ИМПУЛЬСА РАКЕТКИ
       let paddleVelocity = 0;      // Текущая скорость ракетки
       let lastPaddleX = paddleX;   // Позиция ракетки в прошлом кадре
       
       let x = canvas.width / 2;
-      let y = canvas.height - 30;
+      let y = canvas.height - paddleHeight - ballRadius;
       let dx = 2;
       let dy = -2;
       
@@ -274,6 +321,7 @@
       let level = 1;
       let ballStuck = true;
       let paused = false;
+      let showingLevelMessage = false;   // идёт ли сейчас показ "УРОВЕНЬ X"
       let highScore = parseInt(localStorage.getItem("breakoutHighScore")) || 0;
       // --- ТАБЛИЦА ЛИДЕРОВ ---
       const LEADERBOARD_KEY = "breakoutLeaderboard";
@@ -286,6 +334,12 @@
       let screenShake = 0;
 
       let currentSpeedFactor = 1; 
+
+      // --- НАСТРОЙКИ ---
+      let soundEnabled = true;        // звук вкл/выкл
+      let relativeTouchControl = false; // относительное управление (только для тач)
+      let touchStartX = 0;            // начальная позиция пальца
+      let paddleStartX = 0;           // начальная позиция ракетки
 
     
 
@@ -401,6 +455,7 @@
 
       //Функция запуска музыки
       function startMusic() {
+        if (!soundEnabled || !musicEnabled || musicPlaying) return; 
         if (!musicEnabled || musicPlaying) return;
         
         musicPlaying = true;
@@ -455,6 +510,7 @@
       }
       
       function playSound(frequency, duration) {
+        if (!soundEnabled) return; //проверка есть ли звук 
         if (audioCtx.state === 'suspended') audioCtx.resume();
         const oscillator = audioCtx.createOscillator();
         const gainNode = audioCtx.createGain();
@@ -468,6 +524,13 @@
         oscillator.stop(audioCtx.currentTime + duration);
       }
 
+      //Вибрация на телефоне
+      function vibratePhone(duration = 30) {
+        if (navigator.vibrate) {
+          navigator.vibrate(duration);
+        }
+      }
+
       // --- УПРАВЛЕНИЕ ---
       document.addEventListener("keydown", keyDownHandler);
       document.addEventListener("keyup", keyUpHandler);
@@ -479,6 +542,13 @@
 
       canvas.addEventListener("click", (e) => {
         if (showLeaderboard) return;
+         // Проверка клика по кнопке звука
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const clickX = (e.clientX - rect.left) * scaleX;
+          const clickY = (e.clientY - rect.top) * scaleY;
+          
         if (gameOver) { 
           restartGame(); 
           return; 
@@ -566,26 +636,37 @@
 
       //Обработка тачей
       function touchHandler(e) {
-        // Отменяем стандартное поведение (прокрутку страницы)
         e.preventDefault();
         
         if (paused || showLeaderboard) return;
         
-        // Берём первый палец из списка касаний
         const touch = e.touches[0];
         const rect = canvas.getBoundingClientRect();
         const relativeX = touch.clientX - rect.left;
-        
-        // Масштабируем координату, если канвас уменьшен (для адаптивности)
         const scaleX = canvas.width / rect.width;
         const adjustedX = relativeX * scaleX;
         
-        if (adjustedX > 0 && adjustedX < canvas.width) {
-          paddleX = adjustedX - paddleWidth / 2;
-          paddleX = Math.max(0, Math.min(paddleX, canvas.width - paddleWidth));
+        if (relativeTouchControl) {
+          // ОТНОСИТЕЛЬНОЕ УПРАВЛЕНИЕ
+          if (e.type === "touchstart") {
+            // Запоминаем начальную позицию пальца и ракетки
+            touchStartX = adjustedX;
+            paddleStartX = paddleX;
+          } else if (e.type === "touchmove") {
+            // Двигаем ракетку на разницу между текущей и начальной позицией
+            const deltaX = adjustedX - touchStartX;
+            paddleX = paddleStartX + deltaX;
+            paddleX = Math.max(0, Math.min(paddleX, canvas.width - paddleWidth));
+          }
+        } else {
+          // АБСОЛЮТНОЕ УПРАВЛЕНИЕ (как раньше)
+          if (adjustedX > 0 && adjustedX < canvas.width) {
+            paddleX = adjustedX - paddleWidth / 2;
+            paddleX = Math.max(0, Math.min(paddleX, canvas.width - paddleWidth));
+          }
         }
         
-        // Если это первое касание (touchstart) — запускаем мяч или стреляем
+        // Запуск мяча или стрельба
         if (e.type === "touchstart" && gameStarted && !gameOver) {
           if (Date.now() < laserBonusEnd) {
             shootLaser();
@@ -670,22 +751,51 @@
               const ballBottom = y + ballRadius;
 
               if (ballRight > b.x && ballLeft < b.x + brickWidth && ballBottom > b.y && ballTop < b.y + brickHeight) {
+                // ОГНЕННЫЙ МЯЧ: пробивает насквозь, не отскакивает
+                if (Date.now() < fireBallEnd) {
+                  b.health--;
+                  b.flash = 5;
+                  
+                  if (b.health <= 0) {
+                    vibratePhone(30);
+                    score++;
+                    brickDestroyed++;
+                    const particleCount = b.maxHealth * 6;
+                    // Используем центр кирпича как точку взрыва
+                    createParticles(b.x + brickWidth / 2, b.y + brickHeight / 2, getBrickColor(b.maxHealth, r), particleCount);
+                    
+                    if (b.maxHealth >= 2) {
+                      createShockwave(b.x + brickWidth / 2, b.y + brickHeight / 2, getBrickColor(b.maxHealth, r));
+                      screenShake = 6 + b.maxHealth * 2;
+                      vibratePhone(50);
+                    }
+                    
+                    if (brickDestroyed === totalBricks) {
+                      brickDestroyed = 0;
+                      updateHighScore();
+                      nextLevel();
+                    }
+                  } else {
+                    playSound(440, 0.05);
+                  }
+                  
+                  // НЕ отскакиваем — мяч летит дальше
+                  return;
+                }
+                
+                // ОБЫЧНЫЙ МЯЧ: нормальная физика
                 const overlapX = Math.min(ballRight, b.x + brickWidth) - Math.max(ballLeft, b.x);
                 const overlapY = Math.min(ballBottom, b.y + brickHeight) - Math.max(ballTop, b.y);
 
-                // 1. Сначала запоминаем точку удара (ПОКА x и y ещё не сдвинуты!)
                 let hitX, hitY;
                 if (overlapX < overlapY) {
-                  // Мяч ударил в БОКОВУЮ грань кирпича
                   hitX = (ballLeft < b.x) ? b.x : b.x + brickWidth;
                   hitY = y;
                 } else {
-                  // Мяч ударил в ВЕРХНЮЮ или НИЖНЮЮ грань
                   hitX = x;
                   hitY = (ballTop < b.y) ? b.y : b.y + brickHeight;
                 }
 
-                // 2. Теперь отталкиваем мяч и меняем направление
                 if (overlapX < overlapY) {
                   dx = -dx;
                   x = (ballLeft < b.x) ? b.x - ballRadius : b.x + brickWidth + ballRadius;
@@ -694,25 +804,23 @@
                   y = (ballTop < b.y) ? b.y - ballRadius : b.y + brickHeight + ballRadius;
                 }
 
-                b.health--;          // уменьшаем прочность на 1
-                b.hitCooldown = 10;   // 10 кадров = 1/6 секунды на "неуязвимость"
-                b.flash = 5;         // вспышка при ударе
+                b.health--;
+                b.hitCooldown = 10;
+                b.flash = 5;
 
                 if (b.health <= 0) {
-                  // Кирпич разрушен полностью
+                  vibratePhone(30);
                   score++;
                   brickDestroyed++;
-                  // Чем крепче кирпич — тем круче взрыв
                   const particleCount = b.maxHealth * 6;
                   createParticles(hitX, hitY, getBrickColor(b.maxHealth, r), particleCount);
                   
-                  // Для крепких кирпичей — ударная волна и тряска экрана
                   if (b.maxHealth >= 2) {
                     createShockwave(hitX, hitY, getBrickColor(b.maxHealth, r));
                     screenShake = 6 + b.maxHealth * 2;
+                    vibratePhone(50);
                   }
                 } else {
-                  // Кирпич просто повреждён — звук тише
                   playSound(440, 0.05);
                 }
 
@@ -727,10 +835,10 @@
                 playSound(660, 0.08);   
                 
                 if (brickDestroyed === totalBricks) {
-                brickDestroyed = 0;
-                updateHighScore();
-                nextLevel();
-              }
+                  brickDestroyed = 0;
+                  updateHighScore();
+                  nextLevel();
+                }
                 return; 
               }
             }
@@ -822,30 +930,36 @@
       
 
       // --- ОТРИСОВКА ---
-      function drawBall() { //Мяч
+      function drawBall() {
         ctx.save();
-        // Мягкое свечение вокруг мяча
-        ctx.shadowBlur = 8;          // было 15, теперь меньше
-        ctx.shadowColor = currentTheme.accent; // цвет свечения совпадает с мячом
         
-        // Градиент с МЕНЬШИМ и БОЛЕЕ МЯГКИМ бликом
+        // Если огненный мяч — меняем цвет на оранжевый
+        const isFireBall = Date.now() < fireBallEnd;
+        const ballColor = isFireBall ? "#FF6600" : currentTheme.accent;
+        
+        ctx.shadowBlur = isFireBall ? 15 : 8;
+        ctx.shadowColor = ballColor;
+        
         const ballGradient = ctx.createRadialGradient(
-          x - ballRadius * 0.3, y - ballRadius * 0.3, ballRadius * 0.1,  // маленький блик
+          x - ballRadius * 0.3, y - ballRadius * 0.3, ballRadius * 0.1,
           x, y, ballRadius
         );
         
-        // ВМЕСТО белого в центре — очень светлый голубой
-        ballGradient.addColorStop(0, "#FFFFFF");
-        ballGradient.addColorStop(0.3, currentTheme.accent);
-        ballGradient.addColorStop(1, shadeColor(currentTheme.accent, -60));
+        if (isFireBall) {
+          ballGradient.addColorStop(0, "#FFFF00");   // жёлтый центр
+          ballGradient.addColorStop(0.4, "#FF6600"); // оранжевый
+          ballGradient.addColorStop(1, "#CC3300");   // тёмно-красный край
+        } else {
+          ballGradient.addColorStop(0, "#FFFFFF");
+          ballGradient.addColorStop(0.3, ballColor);
+          ballGradient.addColorStop(1, shadeColor(ballColor, -60));
+        }
         
         ctx.beginPath();
         ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
         ctx.fillStyle = ballGradient;
         ctx.fill();
-        ctx.closePath();
         
-        // Сбрасываем тень
         ctx.shadowBlur = 0;
         ctx.restore();
       }
@@ -860,7 +974,8 @@
           
           ctx.save();
           ctx.globalAlpha = alpha;
-          ctx.fillStyle = currentTheme.accent;
+          const isFireBall = Date.now() < fireBallEnd;
+          ctx.fillStyle = isFireBall ? "#FF6600" : currentTheme.accent;
           ctx.shadowBlur = 5;   // свечение
           ctx.shadowColor = currentTheme.accent;
           ctx.beginPath();
@@ -871,21 +986,40 @@
       }
 
       function drawPaddle() {
-        ctx.save();   // ← СОХРАНЯЕМ в начале
+        ctx.save();
         
-        // Если активен лазер — подсвечиваем ракетку
+        // Градиент как у мяча и кирпичей
+        const paddleGradient = ctx.createLinearGradient(
+          paddleX, canvas.height - paddleHeight,
+          paddleX, canvas.height
+        );
+        paddleGradient.addColorStop(0, shadeColor(currentTheme.accent, 40));   // светлый верх
+        paddleGradient.addColorStop(0.5, currentTheme.accent);                 // основной цвет
+        paddleGradient.addColorStop(1, shadeColor(currentTheme.accent, -40));  // тёмный низ
+        
+        // Свечение при активном лазере
         if (Date.now() < laserBonusEnd) {
           ctx.shadowBlur = 15;
           ctx.shadowColor = "#FF00FF";
+        } else {
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = currentTheme.accent;
         }
         
+        // Основная ракетка
         ctx.beginPath();
         ctx.rect(paddleX, canvas.height - paddleHeight, paddleWidth, paddleHeight);
-        ctx.fillStyle = paddleFlash > 0 ? "#FFFFFF" : currentTheme.accent; // тема для ракетки
+        ctx.fillStyle = paddleFlash > 0 ? "#FFFFFF" : paddleGradient;
         ctx.fill();
-        ctx.closePath();
         
-        ctx.restore();   // ← ВОССТАНАВЛИВАЕМ в конце
+        // Блик сверху (тонкая светлая линия)
+        ctx.beginPath();
+        ctx.moveTo(paddleX + 2, canvas.height - paddleHeight + 2);
+        ctx.lineTo(paddleX + paddleWidth - 2, canvas.height - paddleHeight + 2);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+        ctx.lineWidth = 1;
+        ctx.stroke();  
+        ctx.restore();
       }
       // Вспомогательная функция для цвета кирпича
       // Возвращает цвет кирпича в зависимости от его типа (прочности)
@@ -1206,14 +1340,18 @@
       }
 
       function applyBonus(type) {
-        if (type === "W") { paddleWidthBonus = 360; playSound(880, 0.1); }
+        if (type === "W") { paddleWidthEnd = Date.now() + 6000; playSound(880, 0.1); }
         else if (type === "+") { lives++; playSound(1100, 0.15); }
-        else if (type === "S") { slowBallBonus = 180; playSound(440, 0.15); }
+        else if (type === "S") { slowBallEnd = Date.now() + 3000; playSound(440, 0.15); }
         else if (type === "$") { score += 50; playSound(1320, 0.15); }
         else if (type === "L") {
           laserBonusEnd = Date.now() + 5000;   // 5 секунд от текущего момента
           playSound(1200, 0.15);
-}
+        }
+        else if (type === "F") {
+          fireBallEnd = Date.now() + 8000;   // 8 секунд
+          playSound(800, 0.15);
+        }
       }
 
       function drawText(text, xPos, yPos, color = "#0095DD", size = "16px") {
@@ -1300,6 +1438,33 @@
         gameStartTime = Date.now();
         recordSaved = false;
         startMusic();
+        
+        // Показываем "Уровень 1" при старте
+        paused = true;
+        showingLevelMessage = true;
+        let levelMessageFrames = 120;
+        
+        function showFirstLevel() {
+          if (levelMessageFrames > 0) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = "bold 52px Arial";
+            ctx.fillStyle = currentTheme.accent;
+            ctx.textAlign = "center";
+            ctx.shadowBlur = 25;
+            ctx.shadowColor = currentTheme.accent;
+            ctx.fillText("УРОВЕНЬ 1", canvas.width / 2, canvas.height / 2);
+            ctx.shadowBlur = 0;
+            ctx.textAlign = "start";
+            
+            levelMessageFrames--;
+            requestAnimationFrame(showFirstLevel);
+          } else {
+            paused = false;
+            showingLevelMessage = false;
+          }
+        }
+        showFirstLevel();
       }
 
       function gameLoop(timestamp) {
@@ -1402,24 +1567,26 @@
         }
 
         if (paused) {
-          ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          ctx.textAlign = "center";
-          ctx.font = "bold 40px Arial";
-          ctx.fillStyle = "#0095DD";
-          ctx.fillText("PAUSED", canvas.width / 2, canvas.height / 2);
-          
-          // Показываем причину паузы
-          ctx.font = "16px Arial";
-          ctx.fillStyle = "#FFFFFF";
-          if (document.hidden) {
-            ctx.fillText("Вкладка свёрнута — вернись в игру", canvas.width / 2, canvas.height / 2 + 40);
-          } else {
-            ctx.fillText("Нажми P или ESC чтобы продолжить", canvas.width / 2, canvas.height / 2 + 40);
+          // Не рисуем "ПАУЗА", если сейчас показывается "УРОВЕНЬ X"
+          if (!showingLevelMessage) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.textAlign = "center";
+            ctx.font = "bold 40px Arial";
+            ctx.fillStyle = "#0095DD";
+            ctx.fillText("PAUSED", canvas.width / 2, canvas.height / 2);
+            
+            ctx.font = "16px Arial";
+            ctx.fillStyle = "#FFFFFF";
+            if (document.hidden) {
+              ctx.fillText("Вкладка свёрнута — вернись в игру", canvas.width / 2, canvas.height / 2 + 40);
+            } else {
+              ctx.fillText("Нажми P или ESC чтобы продолжить", canvas.width / 2, canvas.height / 2 + 40);
+            }
+            
+            ctx.textAlign = "start";
           }
-          
-          ctx.textAlign = "start";
           ctx.restore();
           return; 
         }
@@ -1467,19 +1634,28 @@
         drawText("Lives: " + lives, canvas.width - 65, 20);
         drawText("Level: " + level, canvas.width / 2 - 30, 20);
         drawText("Best: " + highScore, canvas.width / 2 - 30, 40);
+        // Кнопка звука в правом верхнем углу
 
         collisionDetection();
         checkBonusCatch();
 
         if (paddleFlash > 0) paddleFlash--;
 
+        // Таймеры бонусов (теперь в реальном времени)
+        const now = Date.now();
+        if (now < paddleWidthEnd) {
+          paddleWidth = paddleWidthBase * 1.5;
+        } else {
+          paddleWidth = paddleWidthBase;
+        }
+
+        const speedMultiplier = (now < slowBallEnd) ? 0.5 : 1;
+
         // 1. Движение мяча
         if (ballStuck) {
           x = paddleX + paddleWidth / 2;
           y = canvas.height - paddleHeight - ballRadius;
         } else {
-          const speedMultiplier = slowBallBonus > 0 ? 0.5 : 1;
-          
           const moveX = dx * speedFactor * speedMultiplier;
           const moveY = dy * speedFactor * speedMultiplier;
 
@@ -1506,7 +1682,7 @@
             createWallFlash(x, ballRadius);
             playSound(330, 0.05);
           }
-          else if (y + moveY > canvas.height - ballRadius && dy > 0) {
+          else if (y + moveY > canvas.height - paddleHeight - ballRadius && dy > 0) { //отскок мяча от ракетки
             if (x > paddleX && x < paddleX + paddleWidth) {
 
               // ОТЛАДКА: выводим состояние в момент удара
@@ -1536,6 +1712,7 @@
               dy = -speed * Math.cos(angle) + paddleVelocity * 0.3;
 
               paddleFlash = 5;
+              vibratePhone(20);   // вибрация при отскоке от ракетки
               playSound(440, 0.1);
               //блок потери жизни
             } else {
@@ -1550,7 +1727,7 @@
                 gameOver = true;
               } else {
                 x = canvas.width / 2;
-                y = canvas.height - 30;
+                y = canvas.height - paddleHeight - ballRadius;
                 const speed = getBallSpeed();
                 dx = speed;
                 dy = -speed;
@@ -1578,16 +1755,6 @@
         // paddleVelocity = сколько пикселей ракетка проехала с прошлого кадра
         paddleVelocity = paddleX - lastPaddleX;
         lastPaddleX = paddleX;
-
-        // Таймеры бонусов
-        if (paddleWidthBonus > 0) {
-          paddleWidthBonus--;
-          paddleWidth = paddleWidthBase * 1.5;
-        } else {
-          paddleWidth = paddleWidthBase;
-        }
-        if (slowBallBonus > 0) slowBallBonus--;
-        
         paddleX = Math.max(0, Math.min(paddleX, canvas.width - paddleWidth));
 
         ctx.restore(); 
@@ -1697,7 +1864,8 @@
         brickDestroyed = 0;
         bonuses.length = 0;
         particles.length = 0;
-        paddleWidthBonus = 0;
+        paddleWidthEnd = 0;
+        fireBallEnd = 0;
         slowBallBonus = 0;
         wallFlashes.length = 0;
         ballTrail.length = 0;
@@ -1705,6 +1873,7 @@
         paddleWidth = paddleWidthBase;
         gameOver = false;
         paused = false;
+        showingLevelMessage = false;
         recordSaved = false;
         showLeaderboard = false;
         document.getElementById("leaderboardButton").textContent = "🏆 Рекорды";
@@ -1712,7 +1881,7 @@
         
         const speed = getBallSpeed();
         x = canvas.width / 2;
-        y = canvas.height - 30;
+        y = canvas.height - paddleHeight - ballRadius;
         dx = speed;
         dy = -speed;
         paddleX = (canvas.width - paddleWidth) / 2;
@@ -1728,9 +1897,10 @@
         lasers.length = 0;
         laserBonusEnd = 0;
         brickDestroyed = 0;
+        fireBallEnd = 0;
         bonuses.length = 0;
         particles.length = 0; // очистка частиц при переходе на нов уровень
-        paddleWidthBonus = 0;
+        paddleWidthEnd = 0;
         slowBallBonus = 0;
         wallFlashes.length = 0;
         ballTrail.length = 0;
@@ -1744,7 +1914,7 @@
         loadLevel(level); //загружаем новый уровень из макета
 
         x = canvas.width / 2;
-        y = canvas.height - 30;
+        y = canvas.height - paddleHeight - ballRadius;
         const speed = getBallSpeed();
         dx = speed;
         dy = -speed;
@@ -1752,22 +1922,27 @@
         ballStuck = true;
         
         paused = true;
+        showingLevelMessage = true;   
         let levelMessageFrames = 120;
         
         function showLevelUp() {
           if (levelMessageFrames > 0) {
             ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.font = "bold 40px Arial";
-            ctx.fillStyle = "#FFE66D";
+            ctx.font = "bold 52px Arial";
+            ctx.fillStyle = currentTheme.accent;   // цвет темы уровня
             ctx.textAlign = "center";
-            ctx.fillText("LEVEL " + level, canvas.width / 2, canvas.height / 2);
+            ctx.shadowBlur = 25;
+            ctx.shadowColor = currentTheme.accent;
+            ctx.fillText("УРОВЕНЬ " + level, canvas.width / 2, canvas.height / 2);
+            ctx.shadowBlur = 0;
             ctx.textAlign = "start";
             
             levelMessageFrames--;
             requestAnimationFrame(showLevelUp);
           } else {
             paused = false;
+            showingLevelMessage = false; //сбрасываем флаг когда показ закончился
             startMusic();   // музыка возобновляется
           }
         }
@@ -1783,7 +1958,8 @@
       bonuses.length = 0;
       particles.length = 0;
       if (typeof lasers !== 'undefined') lasers.length = 0;
-      paddleWidthBonus = 0;
+      ppaddleWidthEnd = 0;
+      fireBallEnd = 0;
       slowBallBonus = 0;
       wallFlashes.length = 0;
       ballTrail.length = 0;
@@ -1796,7 +1972,7 @@
       
       const speed = getBallSpeed();
       x = canvas.width / 2;
-      y = canvas.height - 30;
+      y = canvas.height - paddleHeight - ballRadius;
       dx = speed;
       dy = -speed;
       paddleX = (canvas.width - paddleWidth) / 2;
@@ -1889,6 +2065,24 @@
       // Кнопка таблицы лидеров
       document.getElementById("leaderboardButton").addEventListener("click", () => {
         toggleLeaderboard();
+      });
+
+      // Кнопка звука
+      document.getElementById("soundButton").addEventListener("click", () => {
+        soundEnabled = !soundEnabled;
+        const btn = document.getElementById("soundButton");
+        
+        if (soundEnabled) {
+          btn.textContent = "🔊";
+          btn.classList.remove("sound-off");
+          if (gameStarted && !paused && !gameOver) {
+            startMusic();
+          }
+        } else {
+          btn.textContent = "🔇";
+          btn.classList.add("sound-off");
+          stopMusic();
+        }
       });
 
 
