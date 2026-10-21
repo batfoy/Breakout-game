@@ -154,10 +154,7 @@
         color: #fff;
       }
 
-      /* Прячем кнопку Start (она всё равно скрыта через JS) */
-      #runButton {
-        display: none;
-      }
+
 
       
       #soundButton.sound-off {
@@ -239,7 +236,6 @@
     <!-- Всё управление в одном контейнере под канвасом -->
     <div class="game-ui">
       <div class="controls">
-        <button id="runButton">Start game</button>
         <button id="resetButton">Reset Record</button>
         <button id="leaderboardButton">🏆 Рекорды</button>
         <button id="pauseButton">⏸ Пауза</button>
@@ -287,7 +283,9 @@
         { bgCenter: "#2a4040", bgEdge: "#0d2020", accent: "#4ECDC4" },  // Уровень 2 — зелёный
         { bgCenter: "#402a2a", bgEdge: "#200d0d", accent: "#FF6B6B" },  // Уровень 3 — красный
         { bgCenter: "#3a2a50", bgEdge: "#1a0d30", accent: "#B57EDC" },  // Уровень 4 — фиолетовый
-        { bgCenter: "#403a2a", bgEdge: "#201a0d", accent: "#FFE66D" }   // Уровень 5 — золотой
+        { bgCenter: "#403a2a", bgEdge: "#201a0d", accent: "#FFE66D" },  // Уровень 5 — золотой
+        { bgCenter: "#3a2a1a", bgEdge: "#1a0d05", accent: "#FF8C42" },  // Уровень 6 — огненный
+        { bgCenter: "#0a0a2a", bgEdge: "#000008", accent: "#88E0EF", space: true }  // Уровень 7 — КОСМОС
       ];
 
       let currentTheme = THEMES[0];
@@ -308,11 +306,12 @@
       let totalBricks = 0;        // общее количество кирпичей на уровне (для проверки победы)
       let gameOver = false;
       let gameStarted = false;
-      let gameStartTime = 0;   // время, когда игра была запущена
+      let gameStartTime = 0;   // время, когда игра была запущена, защита от быстрых кликов
       let wallFlashes = [];   // массив вспышек на стенах
+      let stars = [];   // массив звёзд для космического уровня
       let fireBallEnd = 0;   // время окончания огненного мяча
 
-      let lastHitSoundTime = 0;   // время последнего звука попадания
+      let lastHitSoundTime = 0;   // время последнего звука попадания. Защита от спама
       let volume = 0.5;   // громкость от 0 до 1 (0.5 = 50%)
 
       // --- ФОНОВАЯ МУЗЫКА ---
@@ -396,6 +395,8 @@
         "F": "#FF6600"  
       };
 
+      
+
       let particles = [];  // массив для частиц
       let shockwaves = [];   // массив ударных волн
 
@@ -410,7 +411,7 @@
 
       
       // НОВЫЕ ПЕРЕМЕННЫЕ ДЛЯ ИМПУЛЬСА РАКЕТКИ
-      let paddleVelocity = 0;      // Текущая скорость ракетки
+      let paddleVelocity = 0;      // Текущая скорость ракетки до импульса мяча
       let lastPaddleX = paddleX;   // Позиция ракетки в прошлом кадре
       
       let x = canvas.width / 2;
@@ -426,6 +427,8 @@
       let ballStuck = true;
       let paused = false;
       let showingLevelMessage = false;   // идёт ли сейчас показ "УРОВЕНЬ X"
+      let levelMessageStartTime = 0;     // когда начался показ
+      const LEVEL_MESSAGE_DURATION = 1000;   // длительность показа в мс (1.5 секунды)
       let highScore = parseInt(localStorage.getItem("breakoutHighScore")) || 0;
       // --- ТАБЛИЦА ЛИДЕРОВ ---
       const LEADERBOARD_KEY = "breakoutLeaderboard";
@@ -452,8 +455,14 @@
         // Выбираем тему уровня (зацикливаем, если уровней больше тем)
         const themeIndex = (levelNumber - 1) % THEMES.length;
         currentTheme = THEMES[themeIndex];
-        // Если уровней больше нет — зацикливаем на последний (или можешь сделать победу)
-        const levelIndex = Math.min(levelNumber - 1, levels.length - 1);
+        // Если это космический уровень — генерируем звёзды
+        if (currentTheme.space) {
+          generateStars();
+        } else {
+          stars = [];   // очищаем звёзды для обычных уровней
+        }
+        // Если уровней больше нет — начинаем заново
+        const levelIndex = (levelNumber - 1) % levels.length;   // зацикливаем макеты
         const layout = levels[levelIndex];
         
         // Обновляем размеры сетки под текущий уровень
@@ -861,10 +870,10 @@
               const ballBottom = y + ballRadius;
 
               if (ballRight > b.x && ballLeft < b.x + brickWidth && ballBottom > b.y && ballTop < b.y + brickHeight) {
-                // ОГНЕННЫЙ МЯЧ: пробивает насквозь, не отскакивает
-                if (Date.now() < fireBallEnd) {
+                // ОГНЕННЫЙ МЯЧ: пробивает насквозь, НО НЕ ДЕЙСТВУЕТ НА БОССА
+                if (Date.now() < fireBallEnd && b.maxHealth !== CONFIG.moveBrickHealth) {
                   b.health--;
-                  b.flash = 5;
+                  b.flash = 5;;
                   //блок огненного мяча
                   if (b.health <= 0) {
                     vibratePhone(30);
@@ -1224,6 +1233,7 @@
 
               // Затемняем кирпич в зависимости от полученных повреждений
               const damageFactor = brick.health / brick.maxHealth;  // 1.0 = целый, меньше = повреждён
+              const isWeak = brick.maxHealth === 1;   // простой кирпич — хлипкий
 
               if (brick.flash > 0) {
                 brickGradient.addColorStop(0, "#FFFFFF");
@@ -1246,8 +1256,10 @@
                 ctx.save();
                 // Прозрачность: от 0 до 1
                 ctx.globalAlpha = brick.spawnProgress;
-                // Сдвиг: кирпич "выезжает" снизу
+                // Сдвиг: кирпич "выезжает" снизу (анимация появления)
                 const yOffset = (1 - brick.spawnProgress) * 25;
+                // Умножаем прозрачность появления на прозрачность хлипкого кирпича
+                ctx.globalAlpha = brick.spawnProgress * (isWeak ? 0.6 : 1);
                 
                 ctx.beginPath();
                 ctx.rect(brickX, brickY + yOffset, brickWidth, brickHeight);
@@ -1256,7 +1268,9 @@
                 ctx.closePath();
                 ctx.restore();
               } else {
-                // Кирпич полностью появился — рисуем как обычно
+                // Кирпич полностью появился
+                // Простые кирпичи — полупрозрачные (0.6), прочные — плотные (1)
+                ctx.globalAlpha = isWeak ? 0.6 : 1;
                 ctx.beginPath();
                 ctx.rect(brickX, brickY, brickWidth, brickHeight);
                 ctx.fillStyle = brickGradient;
@@ -1264,32 +1278,35 @@
                 ctx.closePath();
               }
 
-              // Теперь добавляем тонкую тень ПОД кирпичом (не вокруг!)
-              ctx.shadowBlur = 4;
-              ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
-              ctx.shadowOffsetX = 0;
-              ctx.shadowOffsetY = 2;  // тень только СНИЗУ
+              // Тень только для прочных кирпичей (простые — лёгкие, без тени)
+              if (!isWeak) {
+                ctx.shadowBlur = 4;
+                ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 2;
+              }
 
               // Обводка сверху градиента (тонкая тёмная линия)
               ctx.beginPath();
               ctx.rect(brickX, brickY, brickWidth, brickHeight);
-              ctx.strokeStyle = shadeColor(baseColor, -60);
-              ctx.lineWidth = 1.5;
+              // Простые — тонкая светлая обводка, прочные — жирная тёмная
+              ctx.strokeStyle = isWeak ? shadeColor(baseColor, -20) : shadeColor(baseColor, -60);
+              ctx.lineWidth = isWeak ? 1 : 1.5;
               ctx.stroke();
               ctx.closePath();
 
-              // Блик сверху (тонкая светлая линия для "стеклянного" эффекта)
               ctx.beginPath();
               ctx.moveTo(brickX + 2, brickY + 2);
               ctx.lineTo(brickX + brickWidth - 2, brickY + 2);
-              ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+              // У простых кирпичей блик слабее — менее "стеклянные"
+              ctx.strokeStyle = isWeak ? "rgba(255, 255, 255, 0.15)" : "rgba(255, 255, 255, 0.3)";
               ctx.lineWidth = 1;
               ctx.stroke();
               ctx.closePath();
 
               // Сбрасываем тень в конце
               ctx.shadowBlur = 0;
-              
+              ctx.globalAlpha = 1;   // сбрасываем прозрачность, чтобы не влияла на следующий кирпич
               if (brick.flash > 0) brick.flash--;
             }
           }
@@ -1357,6 +1374,57 @@
           life: 1,
           color: currentTheme.accent
         });
+      }
+
+      // Генерируем звёзды для космического уровня
+      function generateStars() {
+        stars = [];
+        // 80 звёзд разного размера
+        for (let i = 0; i < 80; i++) {
+          stars.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            size: Math.random() * 1.8 + 0.4,
+            twinkleSpeed: Math.random() * 0.003 + 0.001,
+            twinkleOffset: Math.random() * Math.PI * 2
+          });
+        }
+        
+        // Добавляем 3 крупные яркие звезды
+        for (let i = 0; i < 3; i++) {
+          stars.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height * 0.6,   // крупные звёзды в верхней части
+            size: Math.random() * 1.5 + 2.5,
+            twinkleSpeed: Math.random() * 0.002 + 0.0005,
+            twinkleOffset: Math.random() * Math.PI * 2
+          });
+        }
+      }
+
+      // Рисуем мерцающие звёзды
+      function drawStars() {
+        const now = Date.now();
+        for (const star of stars) {
+          // Мерцание: плавное изменение яркости по синусоиде
+          const twinkle = 0.4 + 0.6 * Math.abs(Math.sin(now * star.twinkleSpeed + star.twinkleOffset));
+          
+          ctx.save();
+          ctx.globalAlpha = twinkle;
+          ctx.fillStyle = "#FFFFFF";
+          ctx.beginPath();
+          ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Свечение для крупных звёзд
+          if (star.size > 2) {
+            ctx.globalAlpha = twinkle * 0.4;
+            ctx.beginPath();
+            ctx.arc(star.x, star.y, star.size * 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
       }
 
       // Отрисовка вспышек на стенах
@@ -1534,7 +1602,11 @@
             //Отрисовка строк
             ctx.fillText(String(i + 1), 25, rowY);
             ctx.fillText(String(rec.score), 200, rowY);
-            ctx.fillText(String(rec.level), 300, rowY);
+            // Вычисляем отображаемый уровень для записи
+            const recDisplayLevel = ((rec.level - 1) % levels.length) + 1;
+            const recDisplayCircle = Math.floor((rec.level - 1) / levels.length) + 1;
+            const levelText = recDisplayCircle > 1 ? `${recDisplayLevel}к${recDisplayCircle}` : String(recDisplayLevel);
+            ctx.fillText(levelText, 300, rowY);
             ctx.fillText(rec.date || "", 380, rowY);
           }
         }
@@ -1558,32 +1630,10 @@
         recordSaved = false;
         startMusic();
         
-        // Показываем "Уровень 1" при старте
+        // Запускаем показ "УРОВЕНЬ X"
         paused = true;
         showingLevelMessage = true;
-        let levelMessageFrames = 120;
-        
-        function showFirstLevel() {
-          if (levelMessageFrames > 0) {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.font = "bold 52px Arial";
-            ctx.fillStyle = currentTheme.accent;
-            ctx.textAlign = "center";
-            ctx.shadowBlur = 25;
-            ctx.shadowColor = currentTheme.accent;
-            ctx.fillText("УРОВЕНЬ 1", canvas.width / 2, canvas.height / 2);
-            ctx.shadowBlur = 0;
-            ctx.textAlign = "start";
-            
-            levelMessageFrames--;
-            requestAnimationFrame(showFirstLevel);
-          } else {
-            paused = false;
-            showingLevelMessage = false;
-          }
-        }
-        showFirstLevel();
+        levelMessageStartTime = Date.now();
       }
 
       function gameLoop(timestamp) {
@@ -1684,10 +1734,48 @@
           ctx.translate((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4);
           screenShake--;
         }
+        // Космический уровень — рисуем звёзды на фоне
+        if (currentTheme.space) {
+          drawStars();
+        }
 
         if (paused) {
-          // Не рисуем "ПАУЗА", если сейчас показывается "УРОВЕНЬ X"
-          if (!showingLevelMessage) {
+          if (showingLevelMessage) {
+            // Показ "УРОВЕНЬ X" при старте или переходе уровня
+            const elapsed = Date.now() - levelMessageStartTime;
+            
+            if (elapsed < LEVEL_MESSAGE_DURATION) {
+              // Рисуем заставку
+              ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              
+              ctx.font = "bold 52px Arial";
+              ctx.fillStyle = currentTheme.accent;
+              ctx.textAlign = "center";
+              ctx.shadowBlur = 25;
+              ctx.shadowColor = currentTheme.accent;
+              
+              const displayLevel = getDisplayLevel();
+              ctx.fillText("УРОВЕНЬ " + displayLevel, canvas.width / 2, canvas.height / 2);
+              
+              ctx.shadowBlur = 0;
+              
+              // Круг маленьким текстом снизу (только со 2-го круга)
+              if (getDisplayCircle() > 1) {
+                ctx.font = "18px Arial";
+                ctx.fillStyle = "#AAAAAA";
+                ctx.fillText("круг " + getDisplayCircle(), canvas.width / 2, canvas.height / 2 + 35);
+              }
+              
+              ctx.textAlign = "start";
+            } else {
+              // Время вышло — заканчиваем показ
+              showingLevelMessage = false;
+              paused = false;
+              startMusic();
+            }
+          } else {
+            // Обычная пауза
             ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
@@ -1706,6 +1794,7 @@
             
             ctx.textAlign = "start";
           }
+          
           ctx.restore();
           return; 
         }
@@ -1751,7 +1840,8 @@
         const currentSpeed = Math.hypot(dx, dy);
         drawText(`Speed: ${currentSpeed.toFixed(1)}`, 8, canvas.height - 10, "#FF6B6B", "12px");
         drawText("Lives: " + lives, canvas.width - 65, 20);
-        drawText("Level: " + level, canvas.width / 2 - 30, 20);
+        const displayLevel = getDisplayLevel();
+        drawText("Level: " + displayLevel, canvas.width / 2 - 30, 20);
         drawText("Best: " + highScore, canvas.width / 2 - 30, 40);
         // Кнопка звука в правом верхнем углу
 
@@ -1964,7 +2054,7 @@
       // Скорость шарика растёт с каждым уровнем
       function getBallSpeed() {
         const baseSpeed = CONFIG.ballBaseSpeed + (level - 1) * CONFIG.speedPerLevel;
-        const maxSpeed = 10;
+        const maxSpeed = CONFIG.maxLevelSpeed;
         
         // Если скорость меньше 80% от максимума — растём линейно
         // Если больше — замедляем рост (асимптотически приближаемся к 10)
@@ -1973,6 +2063,16 @@
         } else {
           return maxSpeed - (maxSpeed - baseSpeed) * 0.5;
         }
+      }
+
+      // Вычисляет отображаемый номер уровня (1-7, повторяется)
+      function getDisplayLevel() {
+        return ((level - 1) % levels.length) + 1;
+      }
+
+      // Вычисляет номер круга (1, 2, 3...)
+      function getDisplayCircle() {
+        return Math.floor((level - 1) / levels.length) + 1;
       }
 
       //Функция перезапуска
@@ -1985,7 +2085,6 @@
         particles.length = 0;
         paddleWidthEnd = 0;
         fireBallEnd = 0;
-        slowBallBonus = 0;
         wallFlashes.length = 0;
         ballTrail.length = 0;
         shockwaves.length = 0;
@@ -1993,6 +2092,7 @@
         gameOver = false;
         paused = false;
         showingLevelMessage = false;
+        levelMessageStartTime = 0;
         recordSaved = false;
         showLeaderboard = false;
         document.getElementById("leaderboardButton").textContent = "🏆 Рекорды";
@@ -2013,25 +2113,25 @@
 
       function nextLevel() {
         level++;
-        //очистка перед сл уровнем
+        // очистка перед следующим уровнем
         lasers.length = 0;
         laserBonusEnd = 0;
         brickDestroyed = 0;
         fireBallEnd = 0;
         bonuses.length = 0;
-        particles.length = 0; // очистка частиц при переходе на нов уровень
+        particles.length = 0;
         paddleWidthEnd = 0;
-        slowBallBonus = 0;
+        slowBallEnd = 0;
         wallFlashes.length = 0;
         ballTrail.length = 0;
-        shockwaves.length = 0; //Очистка волн при переходе уровня
+        shockwaves.length = 0;
         paddleWidth = paddleWidthBase;
 
         playSound(880, 0.15);
         setTimeout(() => playSound(1100, 0.15), 150);
         setTimeout(() => playSound(1320, 0.3), 300);
         
-        loadLevel(level); //загружаем новый уровень из макета
+        loadLevel(level);
 
         x = canvas.width / 2;
         y = canvas.height - paddleHeight - ballRadius;
@@ -2041,34 +2141,12 @@
         paddleX = (canvas.width - paddleWidth) / 2;
         ballStuck = true;
         
+        // Запускаем показ "УРОВЕНЬ X"
         paused = true;
-        showingLevelMessage = true;   
-        let levelMessageFrames = 120;
-        
-        function showLevelUp() {
-          if (levelMessageFrames > 0) {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.font = "bold 52px Arial";
-            ctx.fillStyle = currentTheme.accent;   // цвет темы уровня
-            ctx.textAlign = "center";
-            ctx.shadowBlur = 25;
-            ctx.shadowColor = currentTheme.accent;
-            ctx.fillText("УРОВЕНЬ " + level, canvas.width / 2, canvas.height / 2);
-            ctx.shadowBlur = 0;
-            ctx.textAlign = "start";
-            
-            levelMessageFrames--;
-            requestAnimationFrame(showLevelUp);
-          } else {
-            paused = false;
-            showingLevelMessage = false; //сбрасываем флаг когда показ закончился
-            startMusic();   // музыка возобновляется
-          }
-        }
+        showingLevelMessage = true;
+        levelMessageStartTime = Date.now();
         currentNoteIndex = 0;
-        stopMusic();   // музыка останавливается на время показа "LEVEL X"
-        showLevelUp();
+        stopMusic();
       }
 
     // ================= ОТЛАДКА =================
@@ -2079,9 +2157,8 @@
       bonuses.length = 0;
       particles.length = 0;
       if (typeof lasers !== 'undefined') lasers.length = 0;
-      ppaddleWidthEnd = 0;
+      paddleWidthEnd = 0;
       fireBallEnd = 0;
-      slowBallBonus = 0;
       wallFlashes.length = 0;
       ballTrail.length = 0;
       shockwaves.length = 0;
@@ -2138,8 +2215,6 @@
     }
     // ===========================================  
 
-      const runButton = document.getElementById("runButton");
-      runButton.style.display = "none";   // скрываем её
       document.getElementById("resetButton").style.display = "none";
 
       //Очищаем таблицу лидеров и бестскор
