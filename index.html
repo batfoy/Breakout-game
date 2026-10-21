@@ -1917,58 +1917,47 @@
             createWallFlash(x, ballRadius);
             playSound(330, 0.05);
           }
-          else if (y + moveY > canvas.height - paddleHeight - ballRadius && dy > 0) { //отскок мяча от ракетки
+          // ОТКОК ОТ РАКЕТКИ: мяч касается верхнего края ракетки И находится над ней
+          else if (y + moveY > canvas.height - paddleHeight - ballRadius && dy > 0) {
             if (x > paddleX && x < paddleX + paddleWidth) {
-
-              // ОТЛАДКА: выводим состояние в момент удара
-              // console.log("=== УДАР О РАКЕТКУ ===");
-              // console.log("y мяча:", y);
-              // console.log("Граница ракетки:", canvas.height - paddleHeight);
-              // console.log("Мяч должен быть на:", canvas.height - paddleHeight - ballRadius);
-              // console.log("Разница:", y - (canvas.height - paddleHeight - ballRadius));
-              // console.log("dy:", dy);
-              // console.log("Провалился на:", Math.max(0, y - (canvas.height - paddleHeight - ballRadius)));
-              // console.log("======================");
-
-              // ВАЖНО: Выталкиваем мяч НАД ракетку (на 1 пиксель выше)
               y = canvas.height - paddleHeight - ballRadius - 1;
 
-              // ПРОДВИНУТАЯ ФИЗИКА + ИМПУЛЬС РАКЕТКИ
               let collidePoint = x - (paddleX + paddleWidth / 2);
               collidePoint = collidePoint / (paddleWidth / 2);
 
               let angle = collidePoint * (Math.PI / 3);
               let speed = getBallSpeed();
 
-              // ДОБАВЛЯЕМ ИМПУЛЬС РАКЕТКИ!
-              // paddleVelocity может быть положительным (движение вправо) или отрицательным (влево)
-              // Мы добавляем часть скорости ракетки к горизонтальной скорости мяча
-              dx = speed * Math.sin(angle) + paddleVelocity * 0.3; // 0.3 = сила влияния (40%)
+              dx = speed * Math.sin(angle) + paddleVelocity * 0.3;
               dy = -speed * Math.cos(angle) + paddleVelocity * 0.3;
 
               paddleFlash = 5;
-              vibratePhone(20);   // вибрация при отскоке от ракетки
+              vibratePhone(20);
               playSound(440, 0.1);
-              //блок потери жизни
+            }
+            // Если мяч МИМО ракетки — ничего не делаем здесь,
+            // даём ему лететь дальше вниз до нижнего края экрана
+          }
+
+          // ПОТЕРЯ ЖИЗНИ: мяч ПОЛНОСТЬЮ ушёл за нижний край канваса
+          if (y + moveY > canvas.height) {
+            lives--;
+            ballTrail.length = 0;
+            screenShake = 10;
+            playSound(150, 0.4);
+            if (!lives) {
+              updateHighScore();
+              saveGameRecord();
+              stopMusic();
+              gameOver = true;
             } else {
-              lives--;
-              ballTrail.length = 0;
-              screenShake = 10;
-              playSound(150, 0.4);
-              if (!lives) {
-                updateHighScore();
-                saveGameRecord();   // ← добавляем игру в таблицу
-                stopMusic();
-                gameOver = true;
-              } else {
-                x = canvas.width / 2;
-                y = canvas.height - paddleHeight - ballRadius;
-                const speed = getBallSpeed();
-                dx = speed;
-                dy = -speed;
-                paddleX = (canvas.width - paddleWidth) / 2;
-                ballStuck = true;
-              }
+              x = canvas.width / 2;
+              y = canvas.height - paddleHeight - ballRadius;
+              const speed = getBallSpeed();
+              dx = speed;
+              dy = -speed;
+              paddleX = (canvas.width - paddleWidth) / 2;
+              ballStuck = true;
             }
           }
           //движение мяча по x,y
