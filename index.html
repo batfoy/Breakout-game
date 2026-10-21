@@ -35,10 +35,13 @@
       canvas { 
         background: #eeeeee; 
         display: block;
-        width: 95%;          /* на всю ширину экрана */
-        max-width: 600px;     /* но не больше 800px на больших экранах */
-        height: auto;         /* высота вычисляется автоматически по пропорциям */
-        max-height: 75vh;     /* максимум 85% высоты экрана (чтобы кнопки влезли) */
+        /* Ширина = минимум из трёх значений:
+          - 95% ширины экрана
+          - 600px (максимум для больших экранов)
+          - ширина, при которой высота не превысит 70vh
+        */
+        width: min(95vw, 600px, calc(70vh * 480 / 440));
+        height: auto;         /* высота подстроится по пропорциям */
         touch-action: none;
         margin: 0 auto;       /* центрируем по горизонтали */
       }
@@ -59,11 +62,25 @@
       /* Общий контейнер управления под канвасом */
       .game-ui {
         width: 95%;
-        max-width: 600px;          /* та же ширина, что у канваса */
-        margin: 8px auto 0;        /* маленький зазор сверху, центрирование */
+        max-width: 600px;
+        margin: 25px auto 0;
         display: flex;
         flex-direction: column;
         gap: 6px;
+      }
+
+      /* На мобильных — прижимаем кнопки к низу экрана */
+      @media (max-width: 700px) {
+        .game-ui {
+          position: fixed;
+          bottom: 12px;
+          left: 0;
+          right: 0;
+          margin: 0;
+          width: 100%;
+          padding: 0 10px;
+          gap: 4px;
+        }
       }
 
       /* Панель кнопок — всегда по центру */
@@ -207,16 +224,18 @@
 
       @media (max-width: 400px) {
         button {
-          padding: 8px 14px;
+          padding: 7px 12px;
+          font-size: 12px;
+        }
+        
+        #soundButton {
+          width: 30px;
+          height: 30px;
           font-size: 13px;
         }
+        
         .volume-slider {
-          width: 80px;
-        }
-        #soundButton {
-          width: 32px;
-          height: 32px;
-          font-size: 14px;
+          width: 70px;
         }
       }
 
@@ -693,18 +712,21 @@
           }
           return;
         }
-        //Запуск мяча
-        // Защита: не даём запустить мяч в первые 500 мс после старта
+        // Стрельба из лазера (если активен)
+        if (Date.now() < laserBonusEnd) {
+          shootLaser();
+        }
+
+        // Запуск мяча (если прилип)
         if (ballStuck && (Date.now() - gameStartTime > 500)) {
           ballStuck = false;
           
           // Задаём направление в зависимости от движения ракетки
           if (paddleVelocity > 1) {
-            dx = Math.abs(dx);   // ракетка вправо → мяч вправо
+            dx = Math.abs(dx);
           } else if (paddleVelocity < -1) {
-            dx = -Math.abs(dx);  // ракетка влево → мяч влево
+            dx = -Math.abs(dx);
           } else {
-            // Ракетка стояла — случайное направление
             dx = (Math.random() > 0.5 ? 1 : -1) * Math.abs(dx);
           }
         }
@@ -785,11 +807,15 @@
           }
         }
         
-        // Запуск мяча или стрельба
+        // Запуск мяча и стрельба (могут работать одновременно)
         if (e.type === "touchstart" && gameStarted && !gameOver) {
+          // Стрельба из лазера (если активен)
           if (Date.now() < laserBonusEnd) {
             shootLaser();
-          } else if (ballStuck && (Date.now() - gameStartTime > 500)) {
+          }
+          
+          // Запуск мяча (если прилип)
+          if (ballStuck && (Date.now() - gameStartTime > 500)) {
             ballStuck = false;
             if (paddleVelocity > 1) {
               dx = Math.abs(dx);
