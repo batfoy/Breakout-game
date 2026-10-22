@@ -293,7 +293,9 @@
         speedPerLevel: 0.3,      // насколько быстрее на каждом уровне
         moveBrickSpeed: 1.5,     // скорость движущегося кирпича
         moveBrickHealth: 5,      // прочность движущегося кирпича
-        maxLevelSpeed: 20         // предел скорости
+        maxLevelSpeed: 20,         // предел скорости
+        spawnRowDelay: 8,      // задержка между строками (волна сверху вниз)
+        spawnColDelay: 2       // задержка между колонками (слева направо)
       };
 
       // Цветовые темы для разных уровней
@@ -514,13 +516,13 @@
               maxHealth: health,
               flash: 0,
               moving: moving,
-              moveDir: 1,          // направление движения: 1 = вправо, -1 = влево
+              moveDir: Math.random() > 0.5 ? 1 : -1,  // направление движения: случайное
               moveSpeed: CONFIG.moveBrickSpeed,      // скорость движения
               minX: startX - (brickWidth + brickPadding),   // левая граница движения
               maxX: startX + (brickWidth + brickPadding),    // правая граница движения
               hitCooldown: 0,    // кулдаун на удар по объекту
               spawnProgress: 0,              // (0 = не появился, 1 = полностью появился)
-              spawnDelay: r * 8 + c * 2      // (задержка для эффекта "волны")
+              spawnDelay: r * CONFIG.spawnRowDelay + c * CONFIG.spawnColDelay //Задержка для эффекта волны
             };
             if (health > 0) totalBricks++;
           }
