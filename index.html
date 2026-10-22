@@ -682,13 +682,9 @@
 
       canvas.addEventListener("click", (e) => {
         if (showLeaderboard) return;
-         // Проверка клика по кнопке звука
-          const rect = canvas.getBoundingClientRect();
-          const scaleX = canvas.width / rect.width;
-          const scaleY = canvas.height / rect.height;
-          const clickX = (e.clientX - rect.left) * scaleX;
-          const clickY = (e.clientY - rect.top) * scaleY;
-          
+        
+        const { x: clickX, y: clickY } = getCanvasCoords(e.clientX, e.clientY);
+        
         if (gameOver) { 
           restartGame(); 
           return; 
@@ -696,42 +692,19 @@
 
         // Запуск игры из меню
         if (!gameStarted) {
-          const rect = canvas.getBoundingClientRect();
-          const scaleX = canvas.width / rect.width;
-          const scaleY = canvas.height / rect.height;
-          const clickX = (e.clientX - rect.left) * scaleX;
-          const clickY = (e.clientY - rect.top) * scaleY;
-          
-          // Проверяем, кликнули ли по кнопке Start
-          const btnX = canvas.width / 2 - 80;
-          const btnY = 330;
-          const btnW = 160;
-          const btnH = 45;
-          
-          if (clickX >= btnX && clickX <= btnX + btnW && 
-              clickY >= btnY && clickY <= btnY + btnH) {
+          if (isStartButtonClick(clickX, clickY)) {
             startGame();
           }
           return;
         }
+        
         // Стрельба из лазера (если активен)
         if (Date.now() < laserBonusEnd) {
           shootLaser();
         }
-
-        // Запуск мяча (если прилип)
-        if (ballStuck && (Date.now() - gameStartTime > 500)) {
-          ballStuck = false;
-          
-          // Задаём направление в зависимости от движения ракетки
-          if (paddleVelocity > 1) {
-            dx = Math.abs(dx);
-          } else if (paddleVelocity < -1) {
-            dx = -Math.abs(dx);
-          } else {
-            dx = (Math.random() > 0.5 ? 1 : -1) * Math.abs(dx);
-          }
-        }
+        
+        // Запуск мяча
+        releaseBall();
       });
 
       //Обработка касания в меню и при Game Over
@@ -744,32 +717,20 @@
         }
         
         if (!gameStarted) {
-          const rect = canvas.getBoundingClientRect();
           const touch = e.changedTouches[0];
-          const clickX = (touch.clientX - rect.left) * (canvas.width / rect.width);
-          const clickY = (touch.clientY - rect.top) * (canvas.height / rect.height);
+          const { x: clickX, y: clickY } = getCanvasCoords(touch.clientX, touch.clientY);
           
-          const btnX = canvas.width / 2 - 80;
-          const btnY = 330;
-          const btnW = 160;
-          const btnH = 45;
-          
-          if (clickX >= btnX && clickX <= btnX + btnW && 
-              clickY >= btnY && clickY <= btnY + btnH) {
+          if (isStartButtonClick(clickX, clickY)) {
             startGame();
           }
           return;
         }
-      }, { passive: false }); 
+      }, { passive: false });
 
 
       function mouseMoveHandler(e) {
         if (paused) return;
-        const rect = canvas.getBoundingClientRect();
-        
-        // Масштабируем координату, если канвас уменьшен
-        const scaleX = canvas.width / rect.width;
-        const relativeX = (e.clientX - rect.left) * scaleX;
+        const { x: relativeX } = getCanvasCoords(e.clientX, e.clientY);
         
         if (relativeX > 0 && relativeX < canvas.width) {
           paddleX = relativeX - paddleWidth / 2;
@@ -784,10 +745,7 @@
         if (paused || showLeaderboard) return;
         
         const touch = e.touches[0];
-        const rect = canvas.getBoundingClientRect();
-        const relativeX = touch.clientX - rect.left;
-        const scaleX = canvas.width / rect.width;
-        const adjustedX = relativeX * scaleX;
+        const { x: adjustedX } = getCanvasCoords(touch.clientX, touch.clientY);
         
         if (relativeTouchControl) {
           // ОТНОСИТЕЛЬНОЕ УПРАВЛЕНИЕ
@@ -811,22 +769,10 @@
         
         // Запуск мяча и стрельба (могут работать одновременно)
         if (e.type === "touchstart" && gameStarted && !gameOver) {
-          // Стрельба из лазера (если активен)
           if (Date.now() < laserBonusEnd) {
             shootLaser();
           }
-          
-          // Запуск мяча (если прилип)
-          if (ballStuck && (Date.now() - gameStartTime > 500)) {
-            ballStuck = false;
-            if (paddleVelocity > 1) {
-              dx = Math.abs(dx);
-            } else if (paddleVelocity < -1) {
-              dx = -Math.abs(dx);
-            } else {
-              dx = (Math.random() > 0.5 ? 1 : -1) * Math.abs(dx);
-            }
-          }
+          releaseBall();
         }
       }
 
@@ -840,12 +786,12 @@
           return;
         }
         // Перезапуск после Game Over
-        if (gameOver && e.key === " ") {
+        if (gameOver && e.key === "Space") {
           restartGame();
           return;
         }
         // СТРЕЛЬБА ИЗ ЛАЗЕРА
-        if (Date.now() < laserBonusEnd && e.key === " ") {
+        if (Date.now() < laserBonusEnd && e.key === "Space") {
           shootLaser();
           return;
         }
@@ -867,17 +813,8 @@
         //Управление
         if (e.key === "Right" || e.key === "ArrowRight") rightPressed = true;
         else if (e.key === "Left" || e.key === "ArrowLeft") leftPressed = true;
-        else if (e.key === " " && ballStuck && (Date.now() - gameStartTime > 500)) {
-          ballStuck = false;
-          // Задаём направление в зависимости от движения ракетки
-          if (paddleVelocity > 1) {
-            dx = Math.abs(dx);          // ракетка вправо → мяч вправо
-          } else if (paddleVelocity < -1) {
-            dx = -Math.abs(dx);         // ракетка влево → мяч влево
-          } else {
-            // Ракетка стояла — случайное направление
-            dx = (Math.random() > 0.5 ? 1 : -1) * Math.abs(dx);
-          }
+        else if (e.code === "Space") {
+          releaseBall();
         }
       }
 
@@ -2080,6 +2017,42 @@
         } else {
           return maxSpeed - (maxSpeed - baseSpeed) * 0.5;
         }
+      }
+
+      // Пересчёт экранных координат (клиентских) в координаты канваса
+      function getCanvasCoords(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return {
+          x: (clientX - rect.left) * scaleX,
+          y: (clientY - rect.top) * scaleY
+        };
+      }
+
+      // Запуск мяча (если он прилип к ракетке)
+      function releaseBall() {
+        if (!ballStuck) return;                            // мяч уже летит
+        if (Date.now() - gameStartTime <= 500) return;     // защита от быстрого клика
+        
+        ballStuck = false;
+        // Направление зависит от движения ракетки
+        if (paddleVelocity > 1) {
+          dx = Math.abs(dx);          // ракетка вправо → мяч вправо
+        } else if (paddleVelocity < -1) {
+          dx = -Math.abs(dx);         // ракетка влево → мяч влево
+        } else {
+          dx = (Math.random() > 0.5 ? 1 : -1) * Math.abs(dx);  // стояла → случайно
+        }
+      }
+
+      // Проверка клика по кнопке START
+      function isStartButtonClick(x, y) {
+        const btnX = canvas.width / 2 - 80;
+        const btnY = 330;
+        const btnW = 160;
+        const btnH = 45;
+        return x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH;
       }
 
       // Вычисляет отображаемый номер уровня (1-7, повторяется)
