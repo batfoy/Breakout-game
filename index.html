@@ -295,7 +295,8 @@
         moveBrickHealth: 5,      // прочность движущегося кирпича
         maxLevelSpeed: 20,         // предел скорости
         spawnRowDelay: 8,      // задержка между строками (волна сверху вниз)
-        spawnColDelay: 2       // задержка между колонками (слева направо)
+        spawnColDelay: 2,       // задержка между колонками (слева направо)
+        laserCooldown: 500  
       };
 
       // Цветовые темы для разных уровней
@@ -840,25 +841,8 @@
                   b.health--;
                   b.flash = 5;;
                   //блок огненного мяча
-                  if (b.health <= 0) {
-                    vibratePhone(30);
-                    score++;
-                    brickDestroyed++;
-                    const particleCount = b.maxHealth * 8;
-                    const power = b.maxHealth >= 3 ? 1.8 : (b.maxHealth >= 2 ? 1.4 : 1);
-                    createParticles(b.x + brickWidth / 2, b.y + brickHeight / 2, getBrickColor(b.maxHealth, r), particleCount, power);
-                    
-                    if (b.maxHealth >= 2) {
-                      createShockwave(b.x + brickWidth / 2, b.y + brickHeight / 2, getBrickColor(b.maxHealth, r));
-                      screenShake = 6 + b.maxHealth * 2;
-                      vibratePhone(50);
-                    }
-                    
-                    if (brickDestroyed === totalBricks) {
-                      brickDestroyed = 0;
-                      updateHighScore();
-                      nextLevel();
-                    }
+                 if (b.health <= 0) {
+                  destroyBrick(b, b.x + brickWidth / 2, b.y + brickHeight / 2, r);
                   } else {
                     playSound(440, 0.05);
                   }
@@ -888,42 +872,29 @@
                   y = (ballTop < b.y) ? b.y - ballRadius : b.y + brickHeight + ballRadius;
                 }
 
-                b.health--;
-                b.hitCooldown = 10;
-                b.flash = 5;
+              b.health--;
+              b.hitCooldown = 10;
+              b.flash = 5;
 
-                if (b.health <= 0) {
-                  vibratePhone(30);
-                  score++;
-                  brickDestroyed++;
-                  const particleCount = b.maxHealth * 6;
-                  createParticles(hitX, hitY, getBrickColor(b.maxHealth, r), particleCount);
-                  
-                  if (b.maxHealth >= 2) {
-                    createShockwave(hitX, hitY, getBrickColor(b.maxHealth, r));
-                    screenShake = 6 + b.maxHealth * 2;
-                    vibratePhone(50);
-                  }
-                } else {
-                  playSound(440, 0.05);
-                }
+              // Дроп бонуса ДО разрушения (чтобы при последнем кирпиче 
+              // он очистился в nextLevel(), а не перенёсся на новый уровень)
+              if (Math.random() < CONFIG.bonusChance) {
+                bonuses.push({
+                  x: b.x + brickWidth / 2,
+                  y: b.y + brickHeight / 2,
+                  type: bonusTypes[Math.floor(Math.random() * bonusTypes.length)],
+                  speed: 2
+                });
+              }
 
-                if (Math.random() < CONFIG.bonusChance) {
-                  bonuses.push({
-                    x: b.x + brickWidth / 2,
-                    y: b.y + brickHeight / 2,
-                    type: bonusTypes[Math.floor(Math.random() * bonusTypes.length)],
-                    speed: 2
-                  });
-                }
-                playSound(660, 0.08);   
-                
-                if (brickDestroyed === totalBricks) {
-                  brickDestroyed = 0;
-                  updateHighScore();
-                  nextLevel();
-                }
-                return; 
+              if (b.health <= 0) {
+                destroyBrick(b, hitX, hitY, r);
+              } else {
+                playSound(440, 0.05);
+              }
+
+              playSound(660, 0.08);   
+              return;  
               }
             }
           }
@@ -935,7 +906,7 @@
         const now = Date.now();
         // Проверка: активен ли бонус + не чаще 2 выстрелов в секунду
         if (now >= laserBonusEnd) return;   // бонус истёк
-        if (now - lastShotTime < 500) return;
+        if (now - lastShotTime < CONFIG.laserCooldown) return;
         lastShotTime = now;
         
         // Создаём ОДИН снаряд по центру ракетки
@@ -947,7 +918,8 @@
         
         playSound(1500, 0.05);
       }
-      // Движение, столкновения и отрисовка лазеров
+      
+      // ЛОГИКА лазеров: движение и столкновения (без отрисовки)
       function updateLasers() {
         for (let i = lasers.length - 1; i >= 0; i--) {
           const laser = lasers[i];
@@ -967,27 +939,14 @@
             for (let c = 0; c < brickColumnCount; c++) {
               const b = bricks[r][c];
               if (b.health > 0) {
-                // Простая проверка попадания в прямоугольник
                 if (laser.x > b.x && laser.x < b.x + brickWidth &&
                     laser.y > b.y && laser.y < b.y + brickHeight) {
                   
-                  // Урон кирпичу
                   b.health--;
                   b.flash = 5;
-                  //блок лазера
+                  
                   if (b.health <= 0) {
-                    score++;
-                    brickDestroyed++;
-                    const particleCount = b.maxHealth * 8;
-                    const power = b.maxHealth >= 3 ? 1.8 : (b.maxHealth >= 2 ? 1.4 : 1);
-                    createParticles(laser.x, laser.y, getBrickColor(b.maxHealth, r), particleCount, power);
-                    
-                    // Проверка завершения уровня
-                    if (brickDestroyed === totalBricks) {
-                      brickDestroyed = 0;
-                      updateHighScore();
-                      nextLevel();
-                    }
+                    destroyBrick(b, laser.x, laser.y, r);
                   }
                   playSound(880, 0.05);
                   
@@ -999,12 +958,16 @@
             if (hit) break;
           }
           
+          // Удаляем лазер, если он попал в кирпич
           if (hit) {
             lasers.splice(i, 1);
-            continue;
           }
-          
-          // Отрисовка снаряда
+        }
+      }
+
+      // ОТРИСОВКА лазеров (без логики)
+      function drawLasers() {
+        for (const laser of lasers) {
           ctx.save();
           ctx.shadowBlur = 10;
           ctx.shadowColor = "#FF00FF";
@@ -1013,6 +976,7 @@
           ctx.restore();
         }
       }
+      
       
 
       // --- ОТРИСОВКА ---
@@ -1175,108 +1139,104 @@
         }
       }
       
+      // Отрисовка всех кирпичей (цикл)
       function drawBricks() {
-        ctx.save(); // сохраняем настройки
+        ctx.save();
         for (let r = 0; r < brickRowCount; r++) {
           for (let c = 0; c < brickColumnCount; c++) {
             const brick = bricks[r][c];
             if (brick.health > 0 || brick.flash > 0) {
+              // Вычисляем позицию кирпича
               let brickX;
               if (brick.moving) {
-                brickX = brick.x;   // движущийся кирпич использует свою текущую позицию
+                brickX = brick.x;
               } else {
                 brickX = c * (brickWidth + brickPadding) + brickOffsetLeft;
                 brick.x = brickX;
               }
               const brickY = r * (brickHeight + brickPadding) + brickOffsetTop;
               brick.y = brickY;
-
-              // Создаём градиент для кирпича
-              const brickGradient = ctx.createLinearGradient(brickX, brickY, brickX, brickY + brickHeight);
-
-              const baseColor = getBrickColor(brick.maxHealth, r);
-
-              // Затемняем кирпич в зависимости от полученных повреждений
-              const damageFactor = brick.health / brick.maxHealth;  // 1.0 = целый, меньше = повреждён
-              const isWeak = brick.maxHealth === 1;   // простой кирпич — хлипкий
-
-              if (brick.flash > 0) {
-                brickGradient.addColorStop(0, "#FFFFFF");
-                brickGradient.addColorStop(1, "#DDDDDD");
-              } else {
-                // Чем больше повреждений, тем темнее кирпич
-                brickGradient.addColorStop(0, shadeColor(baseColor, 20 * damageFactor));
-                brickGradient.addColorStop(0.5, shadeColor(baseColor, -20 * (1 - damageFactor)));
-                brickGradient.addColorStop(1, shadeColor(baseColor, -50));
-              }
-
-              // ВАЖНО: сначала отключаем ВСЕ эффекты перед отрисовкой
-              ctx.shadowBlur = 0;
-              ctx.shadowOffsetX = 0;
-              ctx.shadowOffsetY = 0;
-
-              // Рисуем сам кирпич с градиентом
-              // АНИМАЦИЯ ПОЯВЛЕНИЯ / Пока кирпич появляется, он рисуется с прозрачностью и сдвигом вниз. Когда spawnProgress = 1 — рисуется нормально.
-              if (brick.spawnProgress < 1) {
-                ctx.save();
-                // Прозрачность: от 0 до 1
-                ctx.globalAlpha = brick.spawnProgress;
-                // Сдвиг: кирпич "выезжает" снизу (анимация появления)
-                const yOffset = (1 - brick.spawnProgress) * 25;
-                // Умножаем прозрачность появления на прозрачность хлипкого кирпича
-                ctx.globalAlpha = brick.spawnProgress * (isWeak ? 0.6 : 1);
-                
-                ctx.beginPath();
-                ctx.rect(brickX, brickY + yOffset, brickWidth, brickHeight);
-                ctx.fillStyle = brickGradient;
-                ctx.fill();
-                ctx.closePath();
-                ctx.restore();
-              } else {
-                // Кирпич полностью появился
-                // Простые кирпичи — полупрозрачные (0.6), прочные — плотные (1)
-                ctx.globalAlpha = isWeak ? 0.6 : 1;
-                ctx.beginPath();
-                ctx.rect(brickX, brickY, brickWidth, brickHeight);
-                ctx.fillStyle = brickGradient;
-                ctx.fill();
-                ctx.closePath();
-              }
-
-              // Тень только для прочных кирпичей (простые — лёгкие, без тени)
-              if (!isWeak) {
-                ctx.shadowBlur = 4;
-                ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
-                ctx.shadowOffsetX = 0;
-                ctx.shadowOffsetY = 2;
-              }
-
-              // Обводка сверху градиента (тонкая тёмная линия)
-              ctx.beginPath();
-              ctx.rect(brickX, brickY, brickWidth, brickHeight);
-              // Простые — тонкая светлая обводка, прочные — жирная тёмная
-              ctx.strokeStyle = isWeak ? shadeColor(baseColor, -20) : shadeColor(baseColor, -60);
-              ctx.lineWidth = isWeak ? 1 : 1.5;
-              ctx.stroke();
-              ctx.closePath();
-
-              ctx.beginPath();
-              ctx.moveTo(brickX + 2, brickY + 2);
-              ctx.lineTo(brickX + brickWidth - 2, brickY + 2);
-              // У простых кирпичей блик слабее — менее "стеклянные"
-              ctx.strokeStyle = isWeak ? "rgba(255, 255, 255, 0.15)" : "rgba(255, 255, 255, 0.3)";
-              ctx.lineWidth = 1;
-              ctx.stroke();
-              ctx.closePath();
-
-              // Сбрасываем тень в конце
-              ctx.shadowBlur = 0;
-              ctx.globalAlpha = 1;   // сбрасываем прозрачность, чтобы не влияла на следующий кирпич
-              if (brick.flash > 0) brick.flash--;
+              
+              // Отрисовка одного кирпича
+              drawBrick(brick, brickX, brickY, r);
             }
           }
         }
-        ctx.restore(); //восстанавливаем настройки
+        ctx.restore();
+      }
+
+      // Отрисовка ОДНОГО кирпича
+      function drawBrick(brick, brickX, brickY, row) {
+        // Градиент кирпича
+        const brickGradient = ctx.createLinearGradient(brickX, brickY, brickX, brickY + brickHeight);
+        const baseColor = getBrickColor(brick.maxHealth, row);
+        const damageFactor = brick.health / brick.maxHealth;
+        const isWeak = brick.maxHealth === 1;
+
+        if (brick.flash > 0) {
+          brickGradient.addColorStop(0, "#FFFFFF");
+          brickGradient.addColorStop(1, "#DDDDDD");
+        } else {
+          brickGradient.addColorStop(0, shadeColor(baseColor, 20 * damageFactor));
+          brickGradient.addColorStop(0.5, shadeColor(baseColor, -20 * (1 - damageFactor)));
+          brickGradient.addColorStop(1, shadeColor(baseColor, -50));
+        }
+
+        // Отключаем эффекты перед отрисовкой
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+
+        // Тело кирпича
+        if (brick.spawnProgress < 1) {
+          ctx.save();
+          const yOffset = (1 - brick.spawnProgress) * 25;
+          ctx.globalAlpha = brick.spawnProgress * (isWeak ? 0.6 : 1);
+          ctx.beginPath();
+          ctx.rect(brickX, brickY + yOffset, brickWidth, brickHeight);
+          ctx.fillStyle = brickGradient;
+          ctx.fill();
+          ctx.closePath();
+          ctx.restore();
+        } else {
+          ctx.globalAlpha = isWeak ? 0.6 : 1;
+          ctx.beginPath();
+          ctx.rect(brickX, brickY, brickWidth, brickHeight);
+          ctx.fillStyle = brickGradient;
+          ctx.fill();
+          ctx.closePath();
+        }
+
+        // Тень только для прочных
+        if (!isWeak) {
+          ctx.shadowBlur = 4;
+          ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 2;
+        }
+
+        // Обводка
+        ctx.beginPath();
+        ctx.rect(brickX, brickY, brickWidth, brickHeight);
+        ctx.strokeStyle = isWeak ? shadeColor(baseColor, -20) : shadeColor(baseColor, -60);
+        ctx.lineWidth = isWeak ? 1 : 1.5;
+        ctx.stroke();
+        ctx.closePath();
+
+        // Блик
+        ctx.beginPath();
+        ctx.moveTo(brickX + 2, brickY + 2);
+        ctx.lineTo(brickX + brickWidth - 2, brickY + 2);
+        ctx.strokeStyle = isWeak ? "rgba(255, 255, 255, 0.15)" : "rgba(255, 255, 255, 0.3)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.closePath();
+
+        // Сброс
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+        
+        if (brick.flash > 0) brick.flash--;
       }
 
       //функция создания частиц 
@@ -1788,17 +1748,21 @@
           return;
         }
 
+        // Обновление логики
         updateBrickSpawns();
         updateMovingBricks();
+        updateLasers();        // логика лазеров
+
+        // Отрисовка
         drawBricks();
-        drawBallTrail(); // след от мяча
+        drawBallTrail();       // след от мяча
         drawBall();
-        updateLasers();   //Лазеры
+        drawLasers();          // отрисовка лазеров
         drawPaddle();
         drawBonuses();
         drawParticles();
-        drawShockwaves(); //отрисовка волн
-        drawWallFlashes(); //вспышки на стенах
+        drawShockwaves();      // отрисовка волн
+        drawWallFlashes();     // вспышки на стенах
         
         drawText("Score: " + score, 8, 20);
         // Отладочная информация (только для тестирования)
@@ -2043,6 +2007,32 @@
           dx = -Math.abs(dx);         // ракетка влево → мяч влево
         } else {
           dx = (Math.random() > 0.5 ? 1 : -1) * Math.abs(dx);  // стояла → случайно
+        }
+      }
+
+      // Общая логика разрушения кирпича
+      function destroyBrick(b, hitX, hitY, row) {
+        vibratePhone(30);
+        score++;
+        brickDestroyed++;
+        
+        // Взрыв: чем крепче кирпич, тем больше и быстрее частицы
+        const particleCount = b.maxHealth * 8;
+        const power = b.maxHealth >= 3 ? 1.8 : (b.maxHealth >= 2 ? 1.4 : 1);
+        createParticles(hitX, hitY, getBrickColor(b.maxHealth, row), particleCount, power);
+        
+        // Ударная волна и тряска для крепких кирпичей
+        if (b.maxHealth >= 2) {
+          createShockwave(hitX, hitY, getBrickColor(b.maxHealth, row));
+          screenShake = 6 + b.maxHealth * 2;
+          vibratePhone(50);
+        }
+        
+        // Проверка завершения уровня
+        if (brickDestroyed === totalBricks) {
+          brickDestroyed = 0;
+          updateHighScore();
+          nextLevel();
         }
       }
 
