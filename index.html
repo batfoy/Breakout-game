@@ -2235,9 +2235,9 @@
 
     // Дать все бонусы сразу
     function giveAllBonuses() {
-      applyBonus("W");
-      applyBonus("S");
-      if (typeof applyBonus === 'function') {
+      if (typeof applyBonus === 'function') { //проверка, а правда ли aplyBonus функция и она существует
+        applyBonus("W");
+        applyBonus("S");
         applyBonus("$");
         applyBonus("+");
       }
