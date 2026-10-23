@@ -1441,10 +1441,23 @@
         ctx.restore();
       }
 
+      //AABB проверка ловли бонуса
       function checkBonusCatch() {
         for (let i = bonuses.length - 1; i >= 0; i--) {
           const bonus = bonuses[i];
-          if (bonus.y + 10 >= canvas.height - paddleHeight && bonus.x > paddleX && bonus.x < paddleX + paddleWidth) {
+          
+          // AABB: проверка пересечения бонуса (20x20) с ракеткой
+          const bonusLeft = bonus.x - 10;
+          const bonusRight = bonus.x + 10;
+          const bonusBottom = bonus.y + 10;
+          const paddleTop = canvas.height - paddleHeight;
+          const paddleLeft = paddleX;
+          const paddleRight = paddleX + paddleWidth;
+          
+          // Бонус пойман, если:
+          // 1. Низ бонуса достиг уровня ракетки
+          // 2. Горизонтально бонус пересекается с ракеткой
+          if (bonusBottom >= paddleTop && bonusRight > paddleLeft && bonusLeft < paddleRight) {
             applyBonus(bonus.type);
             bonuses.splice(i, 1);
           }
