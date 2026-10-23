@@ -2249,6 +2249,9 @@
 
       //Очищаем таблицу лидеров и бестскор
       document.getElementById("resetButton").addEventListener("click", () => {
+        // Защита от случайного нажатия
+        if (!confirm("Сбросить все рекорды? Это действие нельзя отменить.")) return;
+        
         localStorage.removeItem("breakoutHighScore");
         localStorage.removeItem(LEADERBOARD_KEY);
         highScore = 0;
