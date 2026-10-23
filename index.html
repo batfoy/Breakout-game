@@ -296,7 +296,8 @@
         maxLevelSpeed: 20,         // предел скорости
         spawnRowDelay: 8,      // задержка между строками (волна сверху вниз)
         spawnColDelay: 2,       // задержка между колонками (слева направо)
-        laserCooldown: 500  
+        laserCooldown: 500,
+        targetFrameTime: 16.667   // целевое время кадра (60 FPS)
       };
 
       // Цветовые темы для разных уровней
@@ -1485,9 +1486,12 @@
       }
 
       function drawText(text, xPos, yPos, color = "#0095DD", size = "16px") {
+        ctx.save();
         ctx.font = `${size} Arial`;
         ctx.fillStyle = color;
+        ctx.textAlign = "start";   // сбрасываем выравнивание
         ctx.fillText(text, xPos, yPos);
+        ctx.restore();
       }
 
       //Таблица лидеров
@@ -1584,7 +1588,7 @@
         const deltaTime = timestamp - lastTime;
         lastTime = timestamp;
 
-        currentSpeedFactor = deltaTime / 16.6; 
+        currentSpeedFactor = deltaTime / CONFIG.targetFrameTime; 
 
         draw(currentSpeedFactor);
         animationId = requestAnimationFrame(gameLoop);
