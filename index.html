@@ -1813,94 +1813,87 @@
 
         const speedMultiplier = (now < slowBallEnd) ? 0.5 : 1;
 
+
         // Движение мяча (пропускаем, если уровень завершается)
         if (!levelCompleting) {
           if (ballStuck) {
+            // Мяч прилип к ракетке — ставим его на центр ракетки
             x = paddleX + paddleWidth / 2;
             y = canvas.height - paddleHeight - ballRadius;
           } else {
-            // 1. Движение мяча
-            if (ballStuck) {
-              x = paddleX + paddleWidth / 2;
-              y = canvas.height - paddleHeight - ballRadius;
-            } else {
-              const moveX = dx * speedFactor * speedMultiplier;
-              const moveY = dy * speedFactor * speedMultiplier;
+            // Мяч летит — вычисляем движение и столкновения
+            const moveX = dx * speedFactor * speedMultiplier;
+            const moveY = dy * speedFactor * speedMultiplier;
 
-              // ПРОВЕРКА СТОЛКНОВЕНИЙ СО СТЕНАМИ
-              // Удар о правую стену (только если мяч летит вправо!)
-              if (x + moveX > canvas.width - ballRadius && dx > 0) {
-                dx = -dx;
-                x = canvas.width - ballRadius - 1;   // ← ВЫТАЛКИВАЕМ мяч из стены
-                createWallFlash(canvas.width - ballRadius, y);
-                playSound(330, 0.05);
-              } 
-              // Удар о левую стену (только если мяч летит влево!)
-              else if (x + moveX < ballRadius && dx < 0) {
-                dx = -dx;
-                x = ballRadius + 1;                  // ← ВЫТАЛКИВАЕМ мяч из стены
-                createWallFlash(ballRadius, y);
-                playSound(330, 0.05);
+            // Удар о правую стену
+            if (x + moveX > canvas.width - ballRadius && dx > 0) {
+              dx = -dx;
+              x = canvas.width - ballRadius - 1;
+              createWallFlash(canvas.width - ballRadius, y);
+              playSound(330, 0.05);
+            } 
+            // Удар о левую стену
+            else if (x + moveX < ballRadius && dx < 0) {
+              dx = -dx;
+              x = ballRadius + 1;
+              createWallFlash(ballRadius, y);
+              playSound(330, 0.05);
+            }
+
+            // Удар о потолок
+            if (y + moveY < ballRadius && dy < 0) {
+              dy = -dy;
+              y = ballRadius + 1;
+              createWallFlash(x, ballRadius);
+              playSound(330, 0.05);
+            }
+            // Отскок от ракетки
+            else if (y + moveY > canvas.height - paddleHeight - ballRadius && dy > 0) {
+              if (x > paddleX && x < paddleX + paddleWidth) {
+                y = canvas.height - paddleHeight - ballRadius - 1;
+
+                let collidePoint = x - (paddleX + paddleWidth / 2);
+                collidePoint = collidePoint / (paddleWidth / 2);
+                let angle = collidePoint * (Math.PI / 3);
+                let speed = getBallSpeed();
+
+                dx = speed * Math.sin(angle) + paddleVelocity * 0.3;
+                dy = -speed * Math.cos(angle) + paddleVelocity * 0.3;
+
+                paddleFlash = 5;
+                vibratePhone(20);
+                playSound(440, 0.1);
               }
-              // Удар о потолок (только если мяч летит вверх!)
-              if (y + moveY < ballRadius && dy < 0) {
-                dy = -dy;
-                y = ballRadius + 1;                  // ← ВЫТАЛКИВАЕМ мяч из потолка
-                createWallFlash(x, ballRadius);
-                playSound(330, 0.05);
+            }
+
+            // Потеря жизни
+            if (y + moveY > canvas.height) {
+              lives--;
+              ballTrail.length = 0;
+              screenShake = 10;
+              playSound(150, 0.4);
+              if (!lives) {
+                updateHighScore();
+                saveGameRecord();
+                stopMusic();
+                gameOver = true;
+              } else {
+                x = canvas.width / 2;
+                y = canvas.height - paddleHeight - ballRadius;
+                const speed = getBallSpeed();
+                dx = speed;
+                dy = -speed;
+                paddleX = (canvas.width - paddleWidth) / 2;
+                ballStuck = true;
               }
-              // ОТКОК ОТ РАКЕТКИ: мяч касается верхнего края ракетки И находится над ней
-              else if (y + moveY > canvas.height - paddleHeight - ballRadius && dy > 0) {
-                if (x > paddleX && x < paddleX + paddleWidth) {
-                  y = canvas.height - paddleHeight - ballRadius - 1;
-
-                  let collidePoint = x - (paddleX + paddleWidth / 2);
-                  collidePoint = collidePoint / (paddleWidth / 2);
-
-                  let angle = collidePoint * (Math.PI / 3);
-                  let speed = getBallSpeed();
-
-                  dx = speed * Math.sin(angle) + paddleVelocity * 0.3;
-                  dy = -speed * Math.cos(angle) + paddleVelocity * 0.3;
-
-                  paddleFlash = 5;
-                  vibratePhone(20);
-                  playSound(440, 0.1);
-                }
-                // Если мяч МИМО ракетки — ничего не делаем здесь,
-                // даём ему лететь дальше вниз до нижнего края экрана
-              }
-
-              // ПОТЕРЯ ЖИЗНИ: мяч ПОЛНОСТЬЮ ушёл за нижний край канваса
-              if (y + moveY > canvas.height) {
-                lives--;
-                ballTrail.length = 0;
-                screenShake = 10;
-                playSound(150, 0.4);
-                if (!lives) {
-                  updateHighScore();
-                  saveGameRecord();
-                  stopMusic();
-                  gameOver = true;
-                } else {
-                  x = canvas.width / 2;
-                  y = canvas.height - paddleHeight - ballRadius;
-                  const speed = getBallSpeed();
-                  dx = speed;
-                  dy = -speed;
-                  paddleX = (canvas.width - paddleWidth) / 2;
-                  ballStuck = true;
-                }
-              }
-              //движение мяча по x,y
-              x += moveX;
-              y += moveY;
-              // Добавляем текущую позицию в след от мяча
-              ballTrail.push({ x: x, y: y });
-              // Ограничиваем длину следа
-              if (ballTrail.length > TRAIL_LENGTH) {
-                ballTrail.shift();   // удаляем самую старую позицию
-              }
+            }
+            
+            // Применяем движение
+            x += moveX;
+            y += moveY;
+            ballTrail.push({ x: x, y: y });
+            if (ballTrail.length > TRAIL_LENGTH) {
+              ballTrail.shift();
             }
           }
         }
@@ -2082,22 +2075,6 @@
           life: 1,
           color: currentTheme.accent
         });
-        
-        // Белые лучи, разлетающиеся равномерно по кругу (не как у кирпичей)
-        const rayCount = 16;
-        for (let i = 0; i < rayCount; i++) {
-          const angle = (i / rayCount) * Math.PI * 2;
-          const speed = 6 + Math.random() * 4;
-          particles.push({
-            x: x,
-            y: y,
-            dx: Math.cos(angle) * speed,
-            dy: Math.sin(angle) * speed,
-            life: 50,
-            color: "#FFFFFF",
-            size: 5
-          });
-        }
         
         // Сильная вибрация
         vibratePhone(80);
